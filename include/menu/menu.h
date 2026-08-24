@@ -71,14 +71,11 @@ void menu_item_select_next(void);
 void menu_item_select_previous(void);
 
 /**
- * menu_process_accelerator - selects the next menu item with
+ * menu_process_accelerator - executes the next menu item with
  * a matching accelerator, starting after the current selection
  *
  * @accelerator a shortcut to quickly select/open an item, defined in menu.xml
  * with an underscore in the item label before the target letter.
- *
- * Return: a boolean value that represents whether the newly selected item
- * needs to be executed.
  */
 void menu_process_accelerator(uint32_t accelerator);
 
