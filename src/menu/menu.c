@@ -1336,6 +1336,9 @@ handle_pipemenu_readable(int fd, uint32_t mask, void *_ctx)
 	char data[8193];
 	ssize_t size;
 
+	/* Track if creation succeded */
+	bool create_success = false;
+
 	do {
 		/* leave space for terminating NULL byte */
 		size = read(fd, data, sizeof(data) - 1);
@@ -1370,27 +1373,28 @@ handle_pipemenu_readable(int fd, uint32_t mask, void *_ctx)
 	}
 
 	create_pipe_menu(ctx);
+	create_success = true;
 
+clean_up:
 	struct menu *menu = ctx->pipemenu;
-	bool pending_auto_enter = menu->pending_auto_enter;
-	menu->pending_auto_enter = false;
 
+	/*
+	 * This unsets the waiting_for_pipemenu flag
+	 * so that menu_submenu_enter() won't be blocked
+	 */
 	pipemenu_ctx_destroy(ctx);
 
-	if (pending_auto_enter) {
-		struct menu *active_leaf = get_selection_leaf();
-		if (active_leaf && active_leaf->selection.menu == menu) {
-			menu_submenu_enter();
+	if (menu && menu->pending_auto_enter) {
+		menu->pending_auto_enter = false;
+
+		if (create_success) {
+			struct menu *active_leaf = get_selection_leaf();
+			if (active_leaf && active_leaf->selection.menu == menu) {
+				menu_submenu_enter();
+			}
 		}
 	}
 
-	return 0;
-
-clean_up:
-	if (ctx->pipemenu) {
-		ctx->pipemenu->pending_auto_enter = false;
-	}
-	pipemenu_ctx_destroy(ctx);
 	return 0;
 }
 
@@ -1615,6 +1619,7 @@ menu_process_accelerator(uint32_t accelerator)
 	}
 
 	menu_process_item_selection(next_selection);
+
 	if (needs_exec && next_selection->submenu) {
 		/* Since we can't execute a submenu, enter it */
 		needs_exec = false;
