@@ -1332,6 +1332,7 @@ static int
 handle_pipemenu_readable(int fd, uint32_t mask, void *_ctx)
 {
 	struct menu_pipe_context *ctx = _ctx;
+	struct menu *menu = ctx->pipemenu;
 	/* two 4k pages + 1 NULL byte */
 	char data[8193];
 	ssize_t size;
@@ -1376,8 +1377,6 @@ handle_pipemenu_readable(int fd, uint32_t mask, void *_ctx)
 	create_success = true;
 
 clean_up:
-	struct menu *menu = ctx->pipemenu;
-
 	/*
 	 * This unsets the waiting_for_pipemenu flag
 	 * so that menu_submenu_enter() won't be blocked
