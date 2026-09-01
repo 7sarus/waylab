@@ -16,10 +16,12 @@
 #include <wlr/render/gles2.h>
 #include <wlr/render/wlr_renderer.h>
 #include <wlr/types/wlr_buffer.h>
+#include <wlr/types/wlr_scene.h>
 #include <wlr/util/box.h>
 #include <wlr/util/log.h>
 #include <wlr/util/transform.h>
 #include "common/macros.h"
+#include "view.h"
 
 #define MAX_BLUR_PASSES 6
 
@@ -190,7 +192,7 @@ static const char *blur_composite_frag_src =
 	"\n"
 	"void main() {\n"
 	"    vec2 half_size = size * 0.5;\n"
-	"    vec2 p = v_pos - half_size;\n"
+	"    vec2 p = (v_texcoord * size) - half_size;\n"
 	"    float dist = rounded_box_sdf(p, half_size, radius);\n"
 	"    if (dist >= 0.5) {\n"
 	"        gl_FragColor = texture2D(tex_bg, v_texcoord);\n"
@@ -228,7 +230,6 @@ static const char *vertex_shader_src =
 static const char *frag_shader_2d_src =
 	"precision mediump float;\n"
 	"varying vec2 v_texcoord;\n"
-	"varying vec2 v_pos;\n"
 	"uniform sampler2D tex;\n"
 	"uniform vec2 size;\n"
 	"uniform float radius;\n"
@@ -241,7 +242,7 @@ static const char *frag_shader_2d_src =
 	"\n"
 	"void main() {\n"
 	"    vec2 half_size = size * 0.5;\n"
-	"    vec2 p = v_pos - half_size;\n"
+	"    vec2 p = (v_texcoord * size) - half_size;\n"
 	"    float dist = rounded_box_sdf(p, half_size, radius);\n"
 	"    float edge_alpha = clamp(0.5 - dist, 0.0, 1.0);\n"
 	"    if (edge_alpha <= 0.0) {\n"
@@ -255,7 +256,6 @@ static const char *frag_shader_external_src =
 	"#extension GL_OES_EGL_image_external : require\n"
 	"precision mediump float;\n"
 	"varying vec2 v_texcoord;\n"
-	"varying vec2 v_pos;\n"
 	"uniform samplerExternalOES tex;\n"
 	"uniform vec2 size;\n"
 	"uniform float radius;\n"
@@ -268,7 +268,7 @@ static const char *frag_shader_external_src =
 	"\n"
 	"void main() {\n"
 	"    vec2 half_size = size * 0.5;\n"
-	"    vec2 p = v_pos - half_size;\n"
+	"    vec2 p = (v_texcoord * size) - half_size;\n"
 	"    float dist = rounded_box_sdf(p, half_size, radius);\n"
 	"    float edge_alpha = clamp(0.5 - dist, 0.0, 1.0);\n"
 	"    if (edge_alpha <= 0.0) {\n"
@@ -1044,5 +1044,101 @@ gl_effects_apply_dual_kawase_blur(
 	glBindFramebuffer(GL_FRAMEBUFFER, prev_fbo);
 	eglMakeCurrent(prev_dpy, prev_draw, prev_read, prev_ctx);
 
+	return true;
+}
+
+static void
+render_scene_buffer_rounded_tree(
+	struct wlr_renderer *renderer,
+	struct wlr_buffer *dst_buffer,
+	struct wlr_scene_node *node,
+	int parent_x, int parent_y,
+	const struct wlr_box *dst_box,
+	float corner_radius,
+	float alpha)
+{
+	if (!node || !node->enabled) {
+		return;
+	}
+	switch (node->type) {
+	case WLR_SCENE_NODE_TREE: {
+		struct wlr_scene_tree *tree = wlr_scene_tree_from_node(node);
+		struct wlr_scene_node *child;
+		wl_list_for_each(child, &tree->children, link) {
+			render_scene_buffer_rounded_tree(renderer, dst_buffer, child,
+				parent_x + node->x, parent_y + node->y,
+				dst_box, corner_radius, alpha);
+		}
+		break;
+	}
+	case WLR_SCENE_NODE_BUFFER: {
+		struct wlr_scene_buffer *scene_buffer = wlr_scene_buffer_from_node(node);
+		if (!scene_buffer->buffer) {
+			break;
+		}
+		struct wlr_texture *texture = NULL;
+		struct wlr_client_buffer *client_buffer = wlr_client_buffer_get(scene_buffer->buffer);
+		if (client_buffer) {
+			texture = client_buffer->texture;
+		}
+		if (!texture) {
+			break;
+		}
+		struct wlr_box surface_dst = {
+			.x = parent_x + node->x,
+			.y = parent_y + node->y,
+			.width = scene_buffer->dst_width,
+			.height = scene_buffer->dst_height,
+		};
+		wlr_log(WLR_DEBUG, "[gl-effects] Drawing client sub-texture at (%d,%d %dx%d) radius=%.1f",
+			surface_dst.x, surface_dst.y, surface_dst.width, surface_dst.height, corner_radius);
+
+		gl_effects_render_texture_rounded(
+			renderer,
+			dst_buffer,
+			texture,
+			&scene_buffer->src_box,
+			&surface_dst,
+			corner_radius,
+			alpha * scene_buffer->opacity,
+			scene_buffer->transform);
+		break;
+	}
+	default:
+		break;
+	}
+}
+
+bool
+gl_effects_render_view_content(
+	struct wlr_renderer *renderer,
+	struct wlr_buffer *dst_buffer,
+	struct view *view,
+	int offset_x,
+	int offset_y,
+	float corner_radius,
+	float alpha)
+{
+	if (!view || !view->content_tree) {
+		return false;
+	}
+	struct wlr_box view_box = {
+		.x = view->current.x + offset_x,
+		.y = view->current.y + offset_y,
+		.width = view->current.width,
+		.height = view->current.height,
+	};
+	wlr_log(WLR_DEBUG, "[gl-effects] rendering rounded view '%s' at (%d,%d %dx%d) radius=%.1f",
+		view->title ? view->title : "view", view_box.x, view_box.y, view_box.width, view_box.height, corner_radius);
+
+	render_scene_buffer_rounded_tree(
+		renderer,
+		dst_buffer,
+		&view->content_tree->node,
+		view_box.x,
+		view_box.y,
+		&view_box,
+		corner_radius,
+		alpha);
 	return true;
 }

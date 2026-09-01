@@ -66,5 +66,19 @@ bool gl_effects_apply_dual_kawase_blur(
 	float blur_radius,
 	bool blur_enabled);
 
+struct view;
+
+/**
+ * Render a view's client surfaces with anti-aliased rounded corners using SDF shader.
+ */
+bool gl_effects_render_view_content(
+	struct wlr_renderer *renderer,
+	struct wlr_buffer *dst_buffer,
+	struct view *view,
+	int offset_x,
+	int offset_y,
+	float corner_radius,
+	float alpha);
+
 #endif /* LABWC_GL_EFFECTS_H */
 

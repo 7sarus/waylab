@@ -12,6 +12,7 @@
 #include "magnifier.h"
 #include "output.h"
 #include "ssd.h"
+#include "theme.h"
 #include "view.h"
 
 struct wlr_surface *
@@ -153,14 +154,31 @@ lab_wlr_scene_output_commit(struct wlr_scene_output *scene_output,
 			box.width *= wlr_output->scale;
 			box.height *= wlr_output->scale;
 
-			gl_effects_apply_dual_kawase_blur(
-				server.renderer,
-				state->buffer,
-				&box,
-				rc.corner_radius * wlr_output->scale,
-				rc.blur_passes,
-				rc.blur_radius,
-				rc.blur_enabled);
+			float r = rc.corner_radius * wlr_output->scale;
+			if (rc.blur_enabled) {
+				gl_effects_apply_dual_kawase_blur(
+					server.renderer,
+					state->buffer,
+					&box,
+					r,
+					rc.blur_passes,
+					rc.blur_radius,
+					rc.blur_enabled);
+			}
+
+			if (rc.corner_radius > 0 && view->content_tree) {
+				float inner_r = MAX(rc.corner_radius - rc.theme->border_width, 0.0f) * wlr_output->scale;
+				int view_off_x = (view->current.x - scene_output->x) * wlr_output->scale;
+				int view_off_y = (view->current.y - scene_output->y) * wlr_output->scale;
+				gl_effects_render_view_content(
+					server.renderer,
+					state->buffer,
+					view,
+					view_off_x,
+					view_off_y,
+					inner_r,
+					1.0f);
+			}
 		}
 	}
 	if (state->buffer && magnifier_is_enabled()) {
