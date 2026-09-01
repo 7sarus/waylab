@@ -1305,7 +1305,7 @@ view_apply_special_geometry(struct view *view)
 	assert(view);
 	assert(!view_is_floating(view));
 	if (!output_is_usable(view->output)) {
-		wlr_log(WLR_ERROR, "view has no output, not updating geometry");
+		wlr_log(WLR_DEBUG, "view has no output, not updating geometry");
 		return;
 	}
 

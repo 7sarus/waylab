@@ -31,7 +31,8 @@ struct shader_prog {
 	GLint a_texcoord;
 	GLint u_proj;
 	GLint u_tex;
-	GLint u_size;
+	GLint u_window_pos;
+	GLint u_window_size;
 	GLint u_radius;
 	GLint u_alpha;
 };
@@ -62,10 +63,9 @@ struct blur_composite_prog {
 	GLint a_texcoord;
 	GLint u_proj;
 	GLint u_tex_blur;
-	GLint u_tex_bg;
-	GLint u_size;
+	GLint u_window_pos;
+	GLint u_window_size;
 	GLint u_radius;
-	GLint u_has_blur;
 };
 
 struct clip_prog {
@@ -174,16 +174,15 @@ static const char *blur_up_frag_src =
 	"    gl_FragColor = sum * (1.0 / 12.0);\n"
 	"}\n";
 
-/* Dual-Kawase Blur Composite Shader (with Background Corner Restoration & Smooth Antialiasing) */
+/* Dual-Kawase Blur Composite Shader (with Smooth Antialiased SDF Rounded Corners) */
 static const char *blur_composite_frag_src =
 	"precision mediump float;\n"
 	"varying vec2 v_texcoord;\n"
 	"varying vec2 v_pos;\n"
 	"uniform sampler2D tex_blur;\n"
-	"uniform sampler2D tex_bg;\n"
-	"uniform vec2 size;\n"
+	"uniform vec2 window_pos;\n"
+	"uniform vec2 window_size;\n"
 	"uniform float radius;\n"
-	"uniform float has_blur;\n"
 	"\n"
 	"float rounded_box_sdf(vec2 p, vec2 half_size, float r) {\n"
 	"    vec2 d = abs(p) - half_size + vec2(r);\n"
@@ -191,27 +190,15 @@ static const char *blur_composite_frag_src =
 	"}\n"
 	"\n"
 	"void main() {\n"
-	"    vec2 half_size = size * 0.5;\n"
-	"    vec2 p = (v_texcoord * size) - half_size;\n"
+	"    vec2 half_size = window_size * 0.5;\n"
+	"    vec2 p = v_pos - (window_pos + half_size);\n"
 	"    float dist = rounded_box_sdf(p, half_size, radius);\n"
-	"    if (dist >= 0.5) {\n"
-	"        gl_FragColor = texture2D(tex_bg, v_texcoord);\n"
-	"    } else if (dist <= -0.5) {\n"
-	"        if (has_blur > 0.5) {\n"
-	"            gl_FragColor = texture2D(tex_blur, v_texcoord);\n"
-	"        } else {\n"
-	"            discard;\n"
-	"        }\n"
-	"    } else {\n"
-	"        float alpha = clamp(0.5 - dist, 0.0, 1.0);\n"
-	"        vec4 bg = texture2D(tex_bg, v_texcoord);\n"
-	"        if (has_blur > 0.5) {\n"
-	"            vec4 blur = texture2D(tex_blur, v_texcoord);\n"
-	"            gl_FragColor = mix(bg, blur, alpha);\n"
-	"        } else {\n"
-	"            gl_FragColor = vec4(bg.rgb, 1.0 - alpha);\n"
-	"        }\n"
+	"    float edge_alpha = smoothstep(1.0, 0.0, dist);\n"
+	"    if (edge_alpha <= 0.0) {\n"
+	"        discard;\n"
 	"    }\n"
+	"    vec4 c = texture2D(tex_blur, v_texcoord);\n"
+	"    gl_FragColor = vec4(c.rgb, c.a * edge_alpha);\n"
 	"}\n";
 
 static const char *vertex_shader_src =
@@ -230,8 +217,10 @@ static const char *vertex_shader_src =
 static const char *frag_shader_2d_src =
 	"precision mediump float;\n"
 	"varying vec2 v_texcoord;\n"
+	"varying vec2 v_pos;\n"
 	"uniform sampler2D tex;\n"
-	"uniform vec2 size;\n"
+	"uniform vec2 window_pos;\n"
+	"uniform vec2 window_size;\n"
 	"uniform float radius;\n"
 	"uniform float alpha;\n"
 	"\n"
@@ -241,10 +230,10 @@ static const char *frag_shader_2d_src =
 	"}\n"
 	"\n"
 	"void main() {\n"
-	"    vec2 half_size = size * 0.5;\n"
-	"    vec2 p = (v_texcoord * size) - half_size;\n"
+	"    vec2 half_size = window_size * 0.5;\n"
+	"    vec2 p = v_pos - (window_pos + half_size);\n"
 	"    float dist = rounded_box_sdf(p, half_size, radius);\n"
-	"    float edge_alpha = clamp(0.5 - dist, 0.0, 1.0);\n"
+	"    float edge_alpha = smoothstep(1.0, 0.0, dist);\n"
 	"    if (edge_alpha <= 0.0) {\n"
 	"        discard;\n"
 	"    }\n"
@@ -256,8 +245,10 @@ static const char *frag_shader_external_src =
 	"#extension GL_OES_EGL_image_external : require\n"
 	"precision mediump float;\n"
 	"varying vec2 v_texcoord;\n"
+	"varying vec2 v_pos;\n"
 	"uniform samplerExternalOES tex;\n"
-	"uniform vec2 size;\n"
+	"uniform vec2 window_pos;\n"
+	"uniform vec2 window_size;\n"
 	"uniform float radius;\n"
 	"uniform float alpha;\n"
 	"\n"
@@ -267,10 +258,10 @@ static const char *frag_shader_external_src =
 	"}\n"
 	"\n"
 	"void main() {\n"
-	"    vec2 half_size = size * 0.5;\n"
-	"    vec2 p = (v_texcoord * size) - half_size;\n"
+	"    vec2 half_size = window_size * 0.5;\n"
+	"    vec2 p = v_pos - (window_pos + half_size);\n"
 	"    float dist = rounded_box_sdf(p, half_size, radius);\n"
-	"    float edge_alpha = clamp(0.5 - dist, 0.0, 1.0);\n"
+	"    float edge_alpha = smoothstep(1.0, 0.0, dist);\n"
 	"    if (edge_alpha <= 0.0) {\n"
 	"        discard;\n"
 	"    }\n"
@@ -356,7 +347,8 @@ init_shader_prog(struct shader_prog *sp, const char *vert_src, const char *frag_
 	sp->a_texcoord = glGetAttribLocation(sp->program, "texcoord");
 	sp->u_proj = glGetUniformLocation(sp->program, "proj");
 	sp->u_tex = glGetUniformLocation(sp->program, "tex");
-	sp->u_size = glGetUniformLocation(sp->program, "size");
+	sp->u_window_pos = glGetUniformLocation(sp->program, "window_pos");
+	sp->u_window_size = glGetUniformLocation(sp->program, "window_size");
 	sp->u_radius = glGetUniformLocation(sp->program, "radius");
 	sp->u_alpha = glGetUniformLocation(sp->program, "alpha");
 	return true;
@@ -416,10 +408,9 @@ init_blur_composite_prog(struct blur_composite_prog *bp, const char *vert_src, c
 	bp->a_texcoord = glGetAttribLocation(bp->program, "texcoord");
 	bp->u_proj = glGetUniformLocation(bp->program, "proj");
 	bp->u_tex_blur = glGetUniformLocation(bp->program, "tex_blur");
-	bp->u_tex_bg = glGetUniformLocation(bp->program, "tex_bg");
-	bp->u_size = glGetUniformLocation(bp->program, "size");
+	bp->u_window_pos = glGetUniformLocation(bp->program, "window_pos");
+	bp->u_window_size = glGetUniformLocation(bp->program, "window_size");
 	bp->u_radius = glGetUniformLocation(bp->program, "radius");
-	bp->u_has_blur = glGetUniformLocation(bp->program, "has_blur");
 	return true;
 }
 
@@ -580,6 +571,7 @@ gl_effects_render_texture_rounded(
 	struct wlr_texture *texture,
 	const struct wlr_fbox *src_box,
 	const struct wlr_box *dst_box,
+	const struct wlr_box *window_box,
 	float corner_radius,
 	float alpha,
 	enum wl_output_transform transform)
@@ -645,32 +637,38 @@ gl_effects_render_texture_rounded(
 
 	float vertices[] = {
 		/* pos_x, pos_y, tex_u, tex_v */
-		x1, y1, s1, t1,
-		x2, y1, s2, t1,
-		x1, y2, s1, t2,
-		x2, y2, s2, t2,
+		x1, y1, s1, t2,
+		x2, y1, s2, t2,
+		x1, y2, s1, t1,
+		x2, y2, s2, t1,
 	};
 
 	glBindBuffer(GL_ARRAY_BUFFER, gl_ctx.quad_vbo);
 	glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_DYNAMIC_DRAW);
 
 	glEnableVertexAttribArray(prog->a_position);
-	glEnableVertexAttribArray(prog->a_texcoord);
 	glVertexAttribPointer(prog->a_position, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void *)0);
+	glEnableVertexAttribArray(prog->a_texcoord);
 	glVertexAttribPointer(prog->a_texcoord, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void *)(2 * sizeof(float)));
 
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(attribs.target, attribs.tex);
+	glTexParameteri(attribs.target, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(attribs.target, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 	glUniform1i(prog->u_tex, 0);
 
-	glUniform2f(prog->u_size, (float)dst_box->width, (float)dst_box->height);
+	glUniform2f(prog->u_window_pos, (float)window_box->x, (float)window_box->y);
+	glUniform2f(prog->u_window_size, (float)window_box->width, (float)window_box->height);
 	glUniform1f(prog->u_radius, corner_radius);
 	glUniform1f(prog->u_alpha, alpha);
 
 	glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
+	glFlush();
+
 	glDisableVertexAttribArray(prog->a_position);
 	glDisableVertexAttribArray(prog->a_texcoord);
+	glDisable(GL_BLEND);
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 
 	glBindFramebuffer(GL_FRAMEBUFFER, prev_fbo);
@@ -893,14 +891,12 @@ gl_effects_apply_dual_kawase_blur(
 	int box_w = box->width;
 	int box_h = box->height;
 
-	/* If background was not captured beforehand, capture from current main_fbo */
-	if (!gl_ctx.fbo_bg.texture || gl_ctx.fbo_bg.width != box_w || gl_ctx.fbo_bg.height != box_h) {
-		ensure_fbo_struct(&gl_ctx.fbo_bg, box_w, box_h);
-		glBindFramebuffer(GL_FRAMEBUFFER, main_fbo);
-		glBindTexture(GL_TEXTURE_2D, gl_ctx.fbo_bg.texture);
-		int gl_y = target_buffer->height - (box->y + box->height);
-		glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, box->x, gl_y, box_w, box_h);
-	}
+	/* Always capture from current main_fbo */
+	ensure_fbo_struct(&gl_ctx.fbo_bg, box_w, box_h);
+	glBindFramebuffer(GL_FRAMEBUFFER, main_fbo);
+	glBindTexture(GL_TEXTURE_2D, gl_ctx.fbo_bg.texture);
+	int gl_y = target_buffer->height - (box->y + box->height);
+	glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, box->x, gl_y, box_w, box_h);
 
 	/* Prepare quad vertices for offscreen FBO rendering */
 	float quad_verts[] = {
@@ -1027,15 +1023,13 @@ gl_effects_apply_dual_kawase_blur(
 		glUniform1i(gl_ctx.prog_blur_composite.u_tex_blur, 0);
 	}
 
-	glActiveTexture(GL_TEXTURE1);
-	glBindTexture(GL_TEXTURE_2D, gl_ctx.fbo_bg.texture);
-	glUniform1i(gl_ctx.prog_blur_composite.u_tex_bg, 1);
-
-	glUniform2f(gl_ctx.prog_blur_composite.u_size, (float)box_w, (float)box_h);
+	glUniform2f(gl_ctx.prog_blur_composite.u_window_pos, (float)box->x, (float)box->y);
+	glUniform2f(gl_ctx.prog_blur_composite.u_window_size, (float)box_w, (float)box_h);
 	glUniform1f(gl_ctx.prog_blur_composite.u_radius, corner_radius);
-	glUniform1f(gl_ctx.prog_blur_composite.u_has_blur, blur_enabled ? 1.0f : 0.0f);
 
 	glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+
+	glFlush();
 
 	glDisableVertexAttribArray(gl_ctx.prog_blur_composite.a_position);
 	glDisableVertexAttribArray(gl_ctx.prog_blur_composite.a_texcoord);
@@ -1043,7 +1037,6 @@ gl_effects_apply_dual_kawase_blur(
 
 	glBindFramebuffer(GL_FRAMEBUFFER, prev_fbo);
 	eglMakeCurrent(prev_dpy, prev_draw, prev_read, prev_ctx);
-
 	return true;
 }
 
@@ -1052,8 +1045,10 @@ render_scene_buffer_rounded_tree(
 	struct wlr_renderer *renderer,
 	struct wlr_buffer *dst_buffer,
 	struct wlr_scene_node *node,
-	int parent_x, int parent_y,
-	const struct wlr_box *dst_box,
+	int scene_output_x,
+	int scene_output_y,
+	float scale,
+	const struct wlr_box *window_box,
 	float corner_radius,
 	float alpha)
 {
@@ -1066,8 +1061,8 @@ render_scene_buffer_rounded_tree(
 		struct wlr_scene_node *child;
 		wl_list_for_each(child, &tree->children, link) {
 			render_scene_buffer_rounded_tree(renderer, dst_buffer, child,
-				parent_x + node->x, parent_y + node->y,
-				dst_box, corner_radius, alpha);
+				scene_output_x, scene_output_y, scale,
+				window_box, corner_radius, alpha);
 		}
 		break;
 	}
@@ -1084,14 +1079,18 @@ render_scene_buffer_rounded_tree(
 		if (!texture) {
 			break;
 		}
+
+		int lx, ly;
+		if (!wlr_scene_node_coords(node, &lx, &ly)) {
+			break;
+		}
+
 		struct wlr_box surface_dst = {
-			.x = parent_x + node->x,
-			.y = parent_y + node->y,
-			.width = scene_buffer->dst_width,
-			.height = scene_buffer->dst_height,
+			.x = (int)roundf((float)(lx - scene_output_x) * scale),
+			.y = (int)roundf((float)(ly - scene_output_y) * scale),
+			.width = (int)roundf((float)scene_buffer->dst_width * scale),
+			.height = (int)roundf((float)scene_buffer->dst_height * scale),
 		};
-		wlr_log(WLR_DEBUG, "[gl-effects] Drawing client sub-texture at (%d,%d %dx%d) radius=%.1f",
-			surface_dst.x, surface_dst.y, surface_dst.width, surface_dst.height, corner_radius);
 
 		gl_effects_render_texture_rounded(
 			renderer,
@@ -1099,6 +1098,7 @@ render_scene_buffer_rounded_tree(
 			texture,
 			&scene_buffer->src_box,
 			&surface_dst,
+			window_box,
 			corner_radius,
 			alpha * scene_buffer->opacity,
 			scene_buffer->transform);
@@ -1114,30 +1114,25 @@ gl_effects_render_view_content(
 	struct wlr_renderer *renderer,
 	struct wlr_buffer *dst_buffer,
 	struct view *view,
-	int offset_x,
-	int offset_y,
+	const struct wlr_box *content_box,
+	int scene_output_x,
+	int scene_output_y,
+	float scale,
 	float corner_radius,
 	float alpha)
 {
-	if (!view || !view->content_tree) {
+	if (!view || !view->content_tree || !content_box) {
 		return false;
 	}
-	struct wlr_box view_box = {
-		.x = offset_x,
-		.y = offset_y,
-		.width = view->current.width,
-		.height = view->current.height,
-	};
-	wlr_log(WLR_DEBUG, "[gl-effects] rendering rounded view '%s' at (%d,%d %dx%d) radius=%.1f",
-		view->title ? view->title : "view", view_box.x, view_box.y, view_box.width, view_box.height, corner_radius);
 
 	render_scene_buffer_rounded_tree(
 		renderer,
 		dst_buffer,
 		&view->content_tree->node,
-		view_box.x,
-		view_box.y,
-		&view_box,
+		scene_output_x,
+		scene_output_y,
+		scale,
+		content_box,
 		corner_radius,
 		alpha);
 	return true;
