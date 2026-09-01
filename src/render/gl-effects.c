@@ -1123,8 +1123,8 @@ gl_effects_render_view_content(
 		return false;
 	}
 	struct wlr_box view_box = {
-		.x = view->current.x + offset_x,
-		.y = view->current.y + offset_y,
+		.x = offset_x,
+		.y = offset_y,
 		.width = view->current.width,
 		.height = view->current.height,
 	};

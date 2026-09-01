@@ -121,10 +121,32 @@ lab_wlr_scene_output_commit(struct wlr_scene_output *scene_output,
 		return true;
 	}
 
+	bool has_effects = (state->buffer && gl_effects_is_available() && (rc.blur_enabled || rc.corner_radius > 0));
+
+	if (has_effects) {
+		/* Temporarily disable content_tree nodes so wlroots scene does not draw rectangular buffers */
+		struct view *view;
+		for_each_view(view, &server.views, LAB_VIEW_CRITERIA_CURRENT_WORKSPACE) {
+			if (view->mapped && !view->shaded && view->maximized == VIEW_AXIS_NONE && !view->fullscreen && view->content_tree) {
+				wlr_scene_node_set_enabled(&view->content_tree->node, false);
+			}
+		}
+	}
+
 	if (!wlr_scene_output_build_state(scene_output, state, NULL)) {
 		wlr_log(WLR_ERROR, "Failed to build output state for %s",
 			wlr_output->name);
 		return false;
+	}
+
+	if (has_effects) {
+		/* Re-enable content_tree nodes for scene-graph tracking & input events */
+		struct view *view;
+		for_each_view(view, &server.views, LAB_VIEW_CRITERIA_CURRENT_WORKSPACE) {
+			if (view->mapped && !view->shaded && view->maximized == VIEW_AXIS_NONE && !view->fullscreen && view->content_tree) {
+				wlr_scene_node_set_enabled(&view->content_tree->node, true);
+			}
+		}
 	}
 
 	if (state->tearing_page_flip) {
