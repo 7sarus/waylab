@@ -44,7 +44,9 @@ struct button {
 
 enum rounded_corner {
 	ROUNDED_CORNER_TOP_LEFT,
-	ROUNDED_CORNER_TOP_RIGHT
+	ROUNDED_CORNER_TOP_RIGHT,
+	ROUNDED_CORNER_BOTTOM_LEFT,
+	ROUNDED_CORNER_BOTTOM_RIGHT,
 };
 
 struct rounded_corner_ctx {
@@ -1186,25 +1188,14 @@ rounded_rect(struct rounded_corner_ctx *ctx)
 
 	cairo_surface_t *surf = buffer->surface;
 	cairo_t *cairo = cairo_create(surf);
+	cairo_set_antialias(cairo, CAIRO_ANTIALIAS_BEST);
 
 	/* set transparent background */
 	cairo_set_operator(cairo, CAIRO_OPERATOR_CLEAR);
 	cairo_paint(cairo);
 
 	/*
-	 * Create outline path and fill. Illustration of top-left corner buffer:
-	 *
-	 *          _,,ooO"""""""""+
-	 *        ,oO"'   ^        |
-	 *      ,o"       |        |
-	 *     o"         |r       |
-	 *    o'          |        |
-	 *    O     r     v        |
-	 *    O<--------->+        |
-	 *    O                    |
-	 *    O                    |
-	 *    O                    |
-	 *    +--------------------+
+	 * Create outline path and fill.
 	 */
 	cairo_set_line_width(cairo, 0.0);
 	cairo_new_sub_path(cairo);
@@ -1221,119 +1212,99 @@ rounded_rect(struct rounded_corner_ctx *ctx)
 		cairo_line_to(cairo, 0, h);
 		cairo_line_to(cairo, 0, 0);
 		break;
+	case ROUNDED_CORNER_BOTTOM_LEFT:
+		cairo_arc(cairo, r, h - r, r, 90 * deg, 180 * deg);
+		cairo_line_to(cairo, 0, 0);
+		cairo_line_to(cairo, w, 0);
+		cairo_line_to(cairo, w, h);
+		break;
+	case ROUNDED_CORNER_BOTTOM_RIGHT:
+		cairo_arc(cairo, w - r, h - r, r, 0 * deg, 90 * deg);
+		cairo_line_to(cairo, 0, h);
+		cairo_line_to(cairo, 0, 0);
+		cairo_line_to(cairo, w, 0);
+		break;
 	}
 	cairo_close_path(cairo);
-	cairo_set_operator(cairo, CAIRO_OPERATOR_SOURCE);
-	/*
-	 * We need to offset the fill pattern vertically by the border
-	 * width to line up with the rest of the titlebar. This is done
-	 * by applying a transformation matrix to the pattern temporarily.
-	 * It would be better to copy the pattern, but cairo does not
-	 * provide a simple way to this.
-	 */
-	cairo_matrix_t matrix;
-	cairo_matrix_init_translate(&matrix, 0, -ctx->line_width);
-	cairo_pattern_set_matrix(ctx->fill_pattern, &matrix);
-	cairo_set_source(cairo, ctx->fill_pattern);
-	cairo_fill_preserve(cairo);
-	cairo_stroke(cairo);
+	if (ctx->fill_pattern) {
+		cairo_set_operator(cairo, CAIRO_OPERATOR_SOURCE);
+		cairo_matrix_t matrix;
+		cairo_matrix_init_translate(&matrix, 0, -ctx->line_width);
+		cairo_pattern_set_matrix(ctx->fill_pattern, &matrix);
+		cairo_set_source(cairo, ctx->fill_pattern);
+		cairo_fill(cairo);
 
-	/* Reset the fill pattern transformation matrix afterward */
-	cairo_matrix_init_identity(&matrix);
-	cairo_pattern_set_matrix(ctx->fill_pattern, &matrix);
-
-	/*
-	 * Stroke horizontal and vertical borders, shown by Xs and Ys
-	 * respectively in the figure below:
-	 *
-	 *          _,,ooO"XXXXXXXXX
-	 *        ,oO"'            |
-	 *      ,o"                |
-	 *     o"                  |
-	 *    o'                   |
-	 *    O                    |
-	 *    Y                    |
-	 *    Y                    |
-	 *    Y                    |
-	 *    Y                    |
-	 *    Y--------------------+
-	 */
-	cairo_set_line_cap(cairo, CAIRO_LINE_CAP_BUTT);
-	set_cairo_color(cairo, ctx->border_color);
-	cairo_set_line_width(cairo, ctx->line_width);
-	double half_line_width = ctx->line_width / 2.0;
-	switch (ctx->corner) {
-	case ROUNDED_CORNER_TOP_LEFT:
-		cairo_move_to(cairo, half_line_width, h);
-		cairo_line_to(cairo, half_line_width, r);
-		cairo_move_to(cairo, r, half_line_width);
-		cairo_line_to(cairo, w, half_line_width);
-		break;
-	case ROUNDED_CORNER_TOP_RIGHT:
-		cairo_move_to(cairo, 0, half_line_width);
-		cairo_line_to(cairo, w - r, half_line_width);
-		cairo_move_to(cairo, w - half_line_width, r);
-		cairo_line_to(cairo, w - half_line_width, h);
-		break;
-	}
-	cairo_stroke(cairo);
-
-	/*
-	 * If radius==0 the borders stroked above go right up to (and including)
-	 * the corners, so there is not need to do any more.
-	 */
-	if (!r) {
-		goto out;
+		/* Reset the fill pattern transformation matrix afterward */
+		cairo_matrix_init_identity(&matrix);
+		cairo_pattern_set_matrix(ctx->fill_pattern, &matrix);
 	}
 
 	/*
-	 * Stroke the arc section of the border of the corner piece.
-	 *
-	 * Note: This figure is drawn at a more zoomed in scale compared with
-	 * those above.
-	 *
-	 *                 ,,ooooO""  ^
-	 *            ,ooo""'      |  |
-	 *         ,oOO"           |  | line-thickness
-	 *       ,OO"              |  |
-	 *     ,OO"         _,,ooO""  v
-	 *    ,O"         ,oO"'
-	 *   ,O'        ,o"
-	 *  ,O'        o"
-	 *  o'        o'
-	 *  O         O
-	 *  O---------O            +
-	 *       <----------------->
-	 *          radius
-	 *
-	 * We handle the edge-case where line-thickness > radius by merely
-	 * setting line-thickness = radius and in effect drawing a quadrant of a
-	 * circle. In this case the X and Y borders butt up against the arc and
-	 * overlap each other (as their line-thicknesses are greater than the
-	 * line-thickness of the arc). As a result, there is no inner rounded
-	 * corners.
-	 *
-	 * So, in order to have inner rounded corners cornerRadius should be
-	 * greater than border.width.
-	 *
-	 * Also, see diagrams in https://github.com/labwc/labwc/pull/990
+	 * Stroke smooth continuous borders and corners
 	 */
-	double line_width = MIN(ctx->line_width, r);
-	cairo_set_line_width(cairo, line_width);
-	half_line_width = line_width / 2.0;
-	switch (ctx->corner) {
-	case ROUNDED_CORNER_TOP_LEFT:
-		cairo_move_to(cairo, half_line_width, r);
-		cairo_arc(cairo, r, r, r - half_line_width, 180 * deg, 270 * deg);
-		break;
-	case ROUNDED_CORNER_TOP_RIGHT:
-		cairo_move_to(cairo, w - r, half_line_width);
-		cairo_arc(cairo, w - r, r, r - half_line_width, -90 * deg, 0 * deg);
-		break;
-	}
-	cairo_stroke(cairo);
+	if (ctx->line_width > 0.0) {
+		cairo_set_operator(cairo, CAIRO_OPERATOR_OVER);
+		cairo_set_line_cap(cairo, CAIRO_LINE_CAP_SQUARE);
+		cairo_set_line_join(cairo, CAIRO_LINE_JOIN_ROUND);
+		set_cairo_color(cairo, ctx->border_color);
+		cairo_set_line_width(cairo, ctx->line_width);
+		double half_line_width = ctx->line_width / 2.0;
 
-out:
+		cairo_new_path(cairo);
+		if (r > 0.0) {
+			switch (ctx->corner) {
+			case ROUNDED_CORNER_TOP_LEFT:
+				cairo_move_to(cairo, half_line_width, h);
+				cairo_line_to(cairo, half_line_width, r);
+				cairo_arc(cairo, r, r, r - half_line_width, 180 * deg, 270 * deg);
+				cairo_line_to(cairo, w, half_line_width);
+				break;
+			case ROUNDED_CORNER_TOP_RIGHT:
+				cairo_move_to(cairo, 0, half_line_width);
+				cairo_line_to(cairo, w - r, half_line_width);
+				cairo_arc(cairo, w - r, r, r - half_line_width, -90 * deg, 0 * deg);
+				cairo_line_to(cairo, w - half_line_width, h);
+				break;
+			case ROUNDED_CORNER_BOTTOM_LEFT:
+				cairo_move_to(cairo, half_line_width, 0);
+				cairo_line_to(cairo, half_line_width, h - r);
+				cairo_arc_negative(cairo, r, h - r, r - half_line_width, 180 * deg, 90 * deg);
+				cairo_line_to(cairo, w, h - half_line_width);
+				break;
+			case ROUNDED_CORNER_BOTTOM_RIGHT:
+				cairo_move_to(cairo, 0, h - half_line_width);
+				cairo_line_to(cairo, w - r, h - half_line_width);
+				cairo_arc_negative(cairo, w - r, h - r, r - half_line_width, 90 * deg, 0 * deg);
+				cairo_line_to(cairo, w - half_line_width, 0);
+				break;
+			}
+		} else {
+			switch (ctx->corner) {
+			case ROUNDED_CORNER_TOP_LEFT:
+				cairo_move_to(cairo, half_line_width, h);
+				cairo_line_to(cairo, half_line_width, half_line_width);
+				cairo_line_to(cairo, w, half_line_width);
+				break;
+			case ROUNDED_CORNER_TOP_RIGHT:
+				cairo_move_to(cairo, 0, half_line_width);
+				cairo_line_to(cairo, w - half_line_width, half_line_width);
+				cairo_line_to(cairo, w - half_line_width, h);
+				break;
+			case ROUNDED_CORNER_BOTTOM_LEFT:
+				cairo_move_to(cairo, half_line_width, 0);
+				cairo_line_to(cairo, half_line_width, h - half_line_width);
+				cairo_line_to(cairo, w, h - half_line_width);
+				break;
+			case ROUNDED_CORNER_BOTTOM_RIGHT:
+				cairo_move_to(cairo, 0, h - half_line_width);
+				cairo_line_to(cairo, w - half_line_width, h - half_line_width);
+				cairo_line_to(cairo, w - half_line_width, 0);
+				break;
+			}
+		}
+		cairo_stroke(cairo);
+	}
+
 	cairo_surface_flush(surf);
 	cairo_destroy(cairo);
 
@@ -1424,6 +1395,13 @@ create_corners(struct theme *theme)
 		.height = theme->titlebar_height + theme->border_width,
 	};
 
+	struct wlr_box bottom_box = {
+		.x = 0,
+		.y = 0,
+		.width = corner_width + theme->border_width,
+		.height = corner_width + theme->border_width,
+	};
+
 	enum ssd_active_state active;
 	FOR_EACH_ACTIVE_STATE(active) {
 		struct rounded_corner_ctx ctx = {
@@ -1437,6 +1415,18 @@ create_corners(struct theme *theme)
 		theme->window[active].corner_top_left_normal = rounded_rect(&ctx);
 		ctx.corner = ROUNDED_CORNER_TOP_RIGHT;
 		theme->window[active].corner_top_right_normal = rounded_rect(&ctx);
+
+		struct rounded_corner_ctx bottom_ctx = {
+			.box = &bottom_box,
+			.radius = rc.corner_radius,
+			.line_width = theme->border_width,
+			.fill_pattern = NULL,
+			.border_color = theme->window[active].border_color,
+			.corner = ROUNDED_CORNER_BOTTOM_LEFT,
+		};
+		theme->window[active].corner_bottom_left_normal = rounded_rect(&bottom_ctx);
+		bottom_ctx.corner = ROUNDED_CORNER_BOTTOM_RIGHT;
+		theme->window[active].corner_bottom_right_normal = rounded_rect(&bottom_ctx);
 	}
 }
 
@@ -1703,8 +1693,8 @@ post_processing(struct theme *theme)
 		+ 2 * switcher_classic_theme->item_padding_y
 		+ 2 * switcher_classic_theme->item_active_border_width;
 
-	if (rc.corner_radius >= theme->titlebar_height) {
-		rc.corner_radius = theme->titlebar_height - 1;
+	if (theme->titlebar_height < rc.corner_radius + 1) {
+		theme->titlebar_height = rc.corner_radius + 1;
 	}
 
 	if (rc.resize_corner_range < 0) {
@@ -1874,6 +1864,8 @@ theme_finish(struct theme *theme)
 		zdrop(&theme->window[active].titlebar_fill);
 		zdrop(&theme->window[active].corner_top_left_normal);
 		zdrop(&theme->window[active].corner_top_right_normal);
+		zdrop(&theme->window[active].corner_bottom_left_normal);
+		zdrop(&theme->window[active].corner_bottom_right_normal);
 		zdrop(&theme->window[active].shadow_corner_top);
 		zdrop(&theme->window[active].shadow_corner_bottom);
 		zdrop(&theme->window[active].shadow_edge);

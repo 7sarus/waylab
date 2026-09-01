@@ -60,6 +60,7 @@
 #include "config/session.h"
 #include "decorations.h"
 #include "desktop-entry.h"
+#include "gl-effects.h"
 #include "idle.h"
 #include "input/keyboard.h"
 #include "labwc.h"
@@ -573,6 +574,8 @@ server_init(void)
 		exit(EXIT_FAILURE);
 	}
 
+	gl_effects_init(server.renderer);
+
 	if (wlr_renderer_get_texture_formats(
 			server.renderer, WLR_BUFFER_CAP_DMABUF)) {
 		if (wlr_renderer_get_drm_fd(server.renderer) >= 0) {
@@ -910,6 +913,7 @@ server_finish(void)
 	wlr_allocator_destroy(server.allocator);
 
 	wl_list_remove(&server.renderer_lost.link);
+	gl_effects_finish();
 	wlr_renderer_destroy(server.renderer);
 
 	workspaces_destroy();

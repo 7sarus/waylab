@@ -2,6 +2,7 @@
 
 #include <assert.h>
 #include <wlr/types/wlr_scene.h>
+#include "buffer.h"
 #include "common/macros.h"
 #include "common/scene-helpers.h"
 #include "config/rcxml.h"
@@ -53,6 +54,11 @@ ssd_border_create(struct ssd *ssd)
 		wlr_scene_node_set_position(&subtree->top->node,
 			theme->border_width + corner_width,
 			-(ssd->titlebar.height + theme->border_width));
+
+		struct wlr_buffer *c_bl = &theme->window[active].corner_bottom_left_normal->base;
+		struct wlr_buffer *c_br = &theme->window[active].corner_bottom_right_normal->base;
+		subtree->corner_bottom_left = lab_wlr_scene_buffer_create(parent, c_bl);
+		subtree->corner_bottom_right = lab_wlr_scene_buffer_create(parent, c_br);
 	}
 
 	if (view->maximized == VIEW_AXIS_BOTH) {
@@ -116,18 +122,33 @@ ssd_border_update(struct ssd *ssd)
 	 *  |_______________|
 	 */
 
-	int side_height = ssd->state.was_squared
-		? height + ssd->titlebar.height
-		: height;
-	int side_y = ssd->state.was_squared
-		? -ssd->titlebar.height
-		: 0;
+	bool rounded = !ssd->state.was_squared && rc.corner_radius > 0;
+	int side_height;
+	int side_y;
+	if (ssd->state.was_squared) {
+		side_height = height + ssd->titlebar.height;
+		side_y = -ssd->titlebar.height;
+	} else if (rounded) {
+		side_height = MAX(height - corner_width, 0);
+		side_y = 0;
+	} else {
+		side_height = height;
+		side_y = 0;
+	}
+
 	int top_width = ssd->titlebar.height <= 0 || ssd->state.was_squared
 		? full_width
 		: MAX(width - 2 * corner_width, 0);
 	int top_x = ssd->titlebar.height <= 0 || ssd->state.was_squared
 		? 0
 		: theme->border_width + corner_width;
+
+	int bottom_width = rounded
+		? MAX(width - 2 * corner_width, 0)
+		: full_width;
+	int bottom_x = rounded
+		? theme->border_width + corner_width
+		: 0;
 
 	enum ssd_active_state active;
 	FOR_EACH_ACTIVE_STATE(active) {
@@ -144,14 +165,24 @@ ssd_border_update(struct ssd *ssd)
 			theme->border_width + width, side_y);
 
 		wlr_scene_rect_set_size(subtree->bottom,
-			full_width, theme->border_width);
+			bottom_width, theme->border_width);
 		wlr_scene_node_set_position(&subtree->bottom->node,
-			0, height);
+			bottom_x, height);
 
 		wlr_scene_rect_set_size(subtree->top,
 			top_width, theme->border_width);
 		wlr_scene_node_set_position(&subtree->top->node,
 			top_x, -(ssd->titlebar.height + theme->border_width));
+
+		wlr_scene_node_set_enabled(&subtree->corner_bottom_left->node, rounded);
+		wlr_scene_node_set_enabled(&subtree->corner_bottom_right->node, rounded);
+
+		if (rounded) {
+			wlr_scene_node_set_position(&subtree->corner_bottom_left->node,
+				0, height - corner_width);
+			wlr_scene_node_set_position(&subtree->corner_bottom_right->node,
+				width - corner_width + theme->border_width, height - corner_width);
+		}
 	}
 }
 

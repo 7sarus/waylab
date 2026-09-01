@@ -1,0 +1,356 @@
+<labwc_config>
+  <theme>
+    <name>Arrondie-Dynamic</name>
+    <!-- Window Effects: Dual-Kawase Background Blur & Smooth Anti-aliased Corners -->
+    <cornerRadius>24</cornerRadius>
+    <blur>
+      <enabled>yes</enabled>
+      <passes>3</passes>
+      <radius>5.0</radius>
+    </blur>
+    <borderWidth>1</borderWidth>
+    <dropShadows>yes</dropShadows>
+    <dropShadowsOnTiled>yes</dropShadowsOnTiled>
+    <titlebar>
+      <layout>icon:iconify,max,close</layout>
+    </titlebar>
+    <keepBorder>yes</keepBorder>
+    <font place="ActiveWindow">
+      <name>SF Pro Display</name>
+      <size>14</size>
+      <weight>Normal</weight>
+      <slant>Normal</slant>
+    </font>
+    <font place="InactiveWindow">
+      <name>SF Pro Display</name>
+      <size>16</size>
+      <weight>Normal</weight>
+      <slant>Normal</slant>
+    </font>
+    <font place="MenuHeader">
+      <name>SF Pro Display</name>
+      <size>16</size>
+      <weight>Normal</weight>
+      <slant>Normal</slant>
+    </font>
+    <font place="MenuItem">
+      <name>SF Pro Display</name>
+      <size>14</size>
+      <weight>Normal</weight>
+      <slant>Normal</slant>
+    </font>
+    <font place="OnScreenDisplay">
+      <name>SF Pro Display</name>
+      <size>16</size>
+      <weight>Normal</weight>
+      <slant>Normal</slant>
+    </font>
+    <icon>WhiteSur-dark</icon>
+  </theme>
+  <desktops>
+    <number>1</number>
+    <names>
+      <name>main</name>
+    </names>
+    <popupTime>0</popupTime>
+  </desktops>
+  <resize>
+    <drawContents>yes</drawContents>
+    <popupShow>never</popupShow>
+  </resize>
+  <margin top="0" bottom="0" left="20" right="20" />
+  <keyboard>
+    <chainQuitKey>C-g</chainQuitKey>
+    <!-- Desktop Navigation -->
+    <keybind key="C-A-Left">
+      <action name="GoToDesktop" to="left" wrap="no" />
+    </keybind>
+    <keybind key="C-A-Right">
+      <action name="GoToDesktop" to="right" wrap="no" />
+    </keybind>
+    <keybind key="W-d">
+      <action name="ToggleShowDesktop" />
+    </keybind>
+    <keybind key="S-A-Left">
+      <action name="SendToDesktop" to="left" wrap="no" />
+    </keybind>
+    <keybind key="S-A-Right">
+      <action name="SendToDesktop" to="right" wrap="no" />
+    </keybind>
+    <!-- Basic Window Actions -->
+    <keybind key="A-F4">
+      <action name="Close" />
+    </keybind>
+    <keybind key="A-Escape">
+      <action name="Lower" />
+    </keybind>
+    <keybind key="A-space">
+      <action name="ShowMenu" menu="client-menu" />
+    </keybind>
+    <keybind key="W-f">
+      <action name="ToggleFullscreen" />
+    </keybind>
+    <keybind key="W-m">
+      <action name="ToggleMaximize" />
+    </keybind>
+    <keybind key="W-l">
+      <action name="Execute" command="hyprlock --config /home/thomas/Documents/projects/new-dots/hypr/hyprlock.conf" />
+    </keybind>
+    <keybind key="W-n">
+      <action name="Iconify" />
+    </keybind>
+    <keybind key="W-t">
+      <action name="ToggleDecorations" />
+    </keybind>
+    <!-- LabWC Native Window Snapping -->
+    <keybind key="W-Left">
+      <action name="SnapToEdge" direction="left" />
+    </keybind>
+    <keybind key="W-Right">
+      <action name="SnapToEdge" direction="right" />
+    </keybind>
+    <keybind key="W-Up">
+      <action name="SnapToEdge" direction="up" />
+    </keybind>
+    <keybind key="W-Down">
+      <action name="SnapToEdge" direction="down" />
+    </keybind>
+    <!-- Window Switching -->
+    <keybind key="W-Tab">
+      <action name="Execute" command="quickshell ipc -p /home/thomas/Documents/projects/new-dots/quickshell call switcher toggle" />
+    </keybind>
+    <keybind key="W-S-Tab">
+      <action name="Execute" command="quickshell ipc -p /home/thomas/Documents/projects/new-dots/quickshell call switcher prev" />
+    </keybind>
+    <keybind key="A-Tab">
+      <action name="NextWindow" />
+    </keybind>
+    <keybind key="A-S-Tab">
+      <action name="PreviousWindow" />
+    </keybind>
+    <!-- Menu & Launchers -->
+    <keybind key="W-o">
+      <action name="ShowMenu" menu="root-menu" />
+    </keybind>
+    <keybind key="W-w">
+      <action name="ShowMenu" menu="client-menu" />
+    </keybind>
+    <keybind key="W-Return">
+      <action name="Execute" command="kitty" />
+    </keybind>
+    <keybind key="W-C-f">
+      <action name="Execute" command="thunar" />
+    </keybind>
+    <keybind key="W-space">
+      <action name="Execute" command="rofi -show drun -show-icons" />
+    </keybind>
+    <keybind key="W-C-t">
+      <action name="Execute" command="tin" />
+    </keybind>
+    <!-- Wallpaper Execution -->
+    <keybind key="W-C-w">
+      <action name="Execute" command=" /home/thomas/Documents/projects/new-dots/scripts/wallpaper.sh" />
+    </keybind>
+    <!-- Custom Utilities -->
+    <keybind key="W-C-p">
+      <action name="Execute" command="wayss.sh partial" />
+    </keybind>
+    <keybind key="W-p">
+      <action name="Execute" command="wayss.sh full" />
+    </keybind>
+    <!-- Hardware Media, Brightness & Audio Controls (with Dunst OSD) -->
+    <keybind key="XF86AudioRaiseVolume">
+      <action name="Execute" command="/home/thomas/Documents/projects/new-dots/scripts/notify-osd.sh volume_up" />
+    </keybind>
+    <keybind key="XF86AudioLowerVolume">
+      <action name="Execute" command="/home/thomas/Documents/projects/new-dots/scripts/notify-osd.sh volume_down" />
+    </keybind>
+    <keybind key="XF86AudioMute">
+      <action name="Execute" command="/home/thomas/Documents/projects/new-dots/scripts/notify-osd.sh volume_mute" />
+    </keybind>
+    <keybind key="XF86AudioMicMute">
+      <action name="Execute" command="/home/thomas/Documents/projects/new-dots/scripts/notify-osd.sh mic_mute" />
+    </keybind>
+    <keybind key="F20">
+      <action name="Execute" command="/home/thomas/Documents/projects/new-dots/scripts/notify-osd.sh mic_mute" />
+    </keybind>
+    <keybind key="XF86MonBrightnessUp">
+      <action name="Execute" command="/home/thomas/Documents/projects/new-dots/scripts/notify-osd.sh brightness_up" />
+    </keybind>
+    <keybind key="XF86MonBrightnessDown">
+      <action name="Execute" command="/home/thomas/Documents/projects/new-dots/scripts/notify-osd.sh brightness_down" />
+    </keybind>
+    <keybind key="XF86AudioPlay">
+      <action name="Execute" command="/home/thomas/Documents/projects/new-dots/scripts/notify-osd.sh play_pause" />
+    </keybind>
+    <keybind key="XF86AudioPause">
+      <action name="Execute" command="/home/thomas/Documents/projects/new-dots/scripts/notify-osd.sh play_pause" />
+    </keybind>
+    <keybind key="XF86AudioNext">
+      <action name="Execute" command="/home/thomas/Documents/projects/new-dots/scripts/notify-osd.sh next" />
+    </keybind>
+    <keybind key="XF86AudioPrev">
+      <action name="Execute" command="/home/thomas/Documents/projects/new-dots/scripts/notify-osd.sh prev" />
+    </keybind>
+    <!-- Touchpad Toggle -->
+    <keybind key="XF86TouchpadToggle">
+      <action name="Execute" command="/home/thomas/Documents/projects/new-dots/scripts/notify-osd.sh touchpad_toggle" />
+    </keybind>
+    <keybind key="XF86TouchpadOn">
+      <action name="Execute" command="/home/thomas/Documents/projects/new-dots/scripts/notify-osd.sh touchpad_on" />
+    </keybind>
+    <keybind key="XF86TouchpadOff">
+      <action name="Execute" command="/home/thomas/Documents/projects/new-dots/scripts/notify-osd.sh touchpad_off" />
+    </keybind>
+    <keybind key="W-S-t">
+      <action name="Execute" command="/home/thomas/Documents/projects/new-dots/scripts/notify-osd.sh touchpad_toggle" />
+    </keybind>
+  </keyboard>
+  <mouse>
+    <dragThreshold>1</dragThreshold>
+    <doubleClickTime>500</doubleClickTime>
+    <context name="Frame">
+      <mousebind button="A-Left" action="Press">
+        <action name="Focus" />
+        <action name="Raise" />
+      </mousebind>
+      <mousebind button="A-Left" action="Click">
+        <action name="Unshade" />
+      </mousebind>
+      <mousebind button="A-Left" action="Drag">
+        <action name="Move" />
+      </mousebind>
+      <mousebind button="A-Right" action="Press">
+        <action name="Focus" />
+        <action name="Raise" />
+        <action name="Unshade" />
+      </mousebind>
+      <mousebind button="A-Right" action="Drag">
+        <action name="Resize" />
+      </mousebind>
+      <mousebind button="A-Middle" action="Press">
+        <action name="Lower" />
+        <action name="Unfocus" />
+      </mousebind>
+    </context>
+    <context name="Titlebar">
+      <mousebind button="Left" action="Press">
+        <action name="Focus" />
+        <action name="Raise" />
+      </mousebind>
+      <mousebind button="Left" action="Drag">
+        <action name="Move" />
+      </mousebind>
+      <mousebind button="Left" action="DoubleClick">
+        <action name="ToggleMaximize" />
+      </mousebind>
+    </context>
+    <context name="Maximize">
+      <mousebind button="Left" action="Click">
+        <action name="ToggleMaximize" />
+      </mousebind>
+    </context>
+    <context name="Iconify">
+      <mousebind button="Left" action="Click">
+        <action name="Iconify" />
+      </mousebind>
+    </context>
+    <context name="Close">
+      <mousebind button="Left" action="Click">
+        <action name="Close" />
+      </mousebind>
+    </context>
+    <context name="Top">
+      <mousebind button="Left" action="Drag">
+        <action name="Resize" />
+      </mousebind>
+    </context>
+    <context name="Left">
+      <mousebind button="Left" action="Drag">
+        <action name="Resize" />
+      </mousebind>
+    </context>
+    <context name="Right">
+      <mousebind button="Left" action="Drag">
+        <action name="Resize" />
+      </mousebind>
+    </context>
+    <context name="Bottom">
+      <mousebind button="Left" action="Drag">
+        <action name="Resize" />
+      </mousebind>
+    </context>
+    <context name="TLCorner">
+      <mousebind button="Left" action="Press">
+        <action name="Focus" />
+        <action name="Raise" />
+      </mousebind>
+      <mousebind button="Left" action="Drag">
+        <action name="Resize" />
+      </mousebind>
+    </context>
+    <context name="TRCorner">
+      <mousebind button="Left" action="Press">
+        <action name="Focus" />
+        <action name="Raise" />
+      </mousebind>
+      <mousebind button="Left" action="Drag">
+        <action name="Resize" />
+      </mousebind>
+    </context>
+    <context name="BLCorner">
+      <mousebind button="Left" action="Press">
+        <action name="Focus" />
+        <action name="Raise" />
+      </mousebind>
+      <mousebind button="Left" action="Drag">
+        <action name="Resize" />
+      </mousebind>
+    </context>
+    <context name="BRCorner">
+      <mousebind button="Left" action="Press">
+        <action name="Focus" />
+        <action name="Raise" />
+      </mousebind>
+      <mousebind button="Left" action="Drag">
+        <action name="Resize" />
+      </mousebind>
+    </context>
+    <context name="Client">
+      <mousebind button="Left" action="Press">
+        <action name="Focus" />
+        <action name="Raise" />
+      </mousebind>
+      <mousebind button="Middle" action="Press">
+        <action name="Focus" />
+        <action name="Raise" />
+      </mousebind>
+      <mousebind button="Right" action="Press">
+        <action name="Focus" />
+        <action name="Raise" />
+      </mousebind>
+    </context>
+    <context name="Root">
+      <mousebind button="Middle" action="Press">
+        <action name="ShowMenu" menu="client-list-combined-menu" />
+      </mousebind>
+      <mousebind button="Right" action="Press">
+        <action name="ShowMenu" menu="root-menu" />
+      </mousebind>
+    </context>
+  </mouse>
+  <core>
+    <gap>10</gap>
+  </core>
+  <focus>
+    <followMouse>yes</followMouse>
+  </focus>
+  <libinput>
+    <device category="touchpad">
+      <sendEventsMode>yes</sendEventsMode>
+      <tap>yes</tap>
+      <naturalScroll>yes</naturalScroll>
+    </device>
+  </libinput>
+</labwc_config>
+

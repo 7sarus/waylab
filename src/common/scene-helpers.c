@@ -6,8 +6,13 @@
 #include <wlr/types/wlr_scene.h>
 #include <wlr/util/log.h>
 #include "common/mem.h"
+#include "config/rcxml.h"
+#include "gl-effects.h"
+#include "labwc.h"
 #include "magnifier.h"
 #include "output.h"
+#include "ssd.h"
+#include "view.h"
 
 struct wlr_surface *
 lab_wlr_surface_from_node(struct wlr_scene_node *node)
@@ -128,6 +133,36 @@ lab_wlr_scene_output_commit(struct wlr_scene_output *scene_output,
 	}
 
 	struct wlr_box additional_damage = {0};
+	if (state->buffer && gl_effects_is_available() && (rc.blur_enabled || rc.corner_radius > 0)) {
+		struct view *view;
+		for_each_view(view, &server.views, LAB_VIEW_CRITERIA_CURRENT_WORKSPACE) {
+			if (!view->mapped || view->shaded || view->maximized != VIEW_AXIS_NONE || view->fullscreen) {
+				continue;
+			}
+			struct border margin = ssd_get_margin(view->ssd);
+			struct wlr_box box = {
+				.x = view->current.x - margin.left,
+				.y = view->current.y - margin.top,
+				.width = view->current.width + margin.left + margin.right,
+				.height = view->current.height + margin.top + margin.bottom,
+			};
+			box.x -= scene_output->x;
+			box.y -= scene_output->y;
+			box.x *= wlr_output->scale;
+			box.y *= wlr_output->scale;
+			box.width *= wlr_output->scale;
+			box.height *= wlr_output->scale;
+
+			gl_effects_apply_dual_kawase_blur(
+				server.renderer,
+				state->buffer,
+				&box,
+				rc.corner_radius * wlr_output->scale,
+				rc.blur_passes,
+				rc.blur_radius,
+				rc.blur_enabled);
+		}
+	}
 	if (state->buffer && magnifier_is_enabled()) {
 		magnifier_draw(output, state->buffer, &additional_damage);
 	}

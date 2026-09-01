@@ -1194,8 +1194,14 @@ entry(xmlNode *node, char *nodename, char *content)
 		fill_title_layout(content);
 	} else if (!strcasecmp(nodename, "showTitle.titlebar.theme")) {
 		rc.show_title = parse_bool(content, true);
-	} else if (!strcmp(nodename, "cornerradius.theme")) {
+	} else if (!strcasecmp(nodename, "cornerRadius.theme") || !strcasecmp(nodename, "cornerRadius")) {
 		rc.corner_radius = atoi(content);
+	} else if (!strcasecmp(nodename, "blur.theme") || !strcasecmp(nodename, "blur") || !strcasecmp(nodename, "enabled.blur.theme") || !strcasecmp(nodename, "enabled.blur")) {
+		set_bool(content, &rc.blur_enabled);
+	} else if (!strcasecmp(nodename, "blurPasses.theme") || !strcasecmp(nodename, "blurPasses") || !strcasecmp(nodename, "passes.blur.theme") || !strcasecmp(nodename, "passes.blur")) {
+		rc.blur_passes = atoi(content);
+	} else if (!strcasecmp(nodename, "blurRadius.theme") || !strcasecmp(nodename, "blurRadius") || !strcasecmp(nodename, "radius.blur.theme") || !strcasecmp(nodename, "radius.blur")) {
+		rc.blur_radius = atof(content);
 	} else if (!strcasecmp(nodename, "keepBorder.theme")) {
 		set_bool(content, &rc.ssd_keep_border);
 	} else if (!strcasecmp(nodename, "maximizedDecoration.theme")) {
@@ -1529,6 +1535,9 @@ rcxml_init(void)
 	rc.title_layout_loaded = false;
 	rc.ssd_keep_border = true;
 	rc.corner_radius = 8;
+	rc.blur_enabled = false;
+	rc.blur_passes = 3;
+	rc.blur_radius = 5.0;
 	rc.shadows_enabled = false;
 	rc.shadows_on_tiled = false;
 

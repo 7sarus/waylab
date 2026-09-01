@@ -1,0 +1,41 @@
+# LabWC Theme - Arrondie Dynamic with Accent Palette
+border.width: 1
+
+# Titlebar Geometry
+window.titlebar.padding.width: 8
+window.titlebar.padding.height: 8
+window.label.text.justify: Center
+window.button.width: 22
+window.button.height: 22
+window.button.spacing: 6
+
+# Window Colors
+window.active.title.bg: Solid
+window.active.title.bg.color: #91c7ff
+window.inactive.title.bg: Solid
+window.inactive.title.bg.color: #141417
+
+window.active.label.text.color: #000000
+window.inactive.label.text.color: #D4D4D8
+
+window.active.border.color: #91c7ff
+window.inactive.border.color: #27272A
+
+window.active.button.unpressed.image.color: #000000
+window.inactive.button.unpressed.image.color: #D4D4D8
+
+# Menus
+menu.overlap.x: -2
+menu.items.bg.color: #000000
+menu.items.text.color: #FFFFFF
+menu.items.active.bg.color: #91c7ff
+menu.items.active.text.color: #000000
+menu.border.color: #27272A
+menu.border.width: 1
+
+# OSD Window Switcher (Alt-Tab)
+osd.bg.color: #141417
+osd.border.color: #91c7ff
+osd.border.width: 2
+osd.label.text.color: #FFFFFF
+

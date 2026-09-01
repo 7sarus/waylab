@@ -1,0 +1,10 @@
+#!/bin/sh
+
+# 1. Desktop & UI Services
+dunst -config /home/thomas/Documents/projects/new-dots/dunst/dunstrc &
+/home/thomas/Documents/projects/new-dots/scripts/wallpaper.sh &
+quickshell -p /home/thomas/Documents/projects/new-dots/quickshell &
+
+# 2. Idle & Power Management
+/home/thomas/Documents/projects/new-dots/scripts/swaydle.sh &
+

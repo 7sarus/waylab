@@ -126,6 +126,8 @@ struct theme {
 
 		struct lab_data_buffer *corner_top_left_normal;
 		struct lab_data_buffer *corner_top_right_normal;
+		struct lab_data_buffer *corner_bottom_left_normal;
+		struct lab_data_buffer *corner_bottom_right_normal;
 
 		struct lab_data_buffer *shadow_corner_top;
 		struct lab_data_buffer *shadow_corner_bottom;

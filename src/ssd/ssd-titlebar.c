@@ -81,7 +81,9 @@ ssd_titlebar_create(struct ssd *ssd)
 			LAB_NODE_TITLE, view, /*data*/ NULL);
 
 		/* Buttons */
-		int x = theme->window_titlebar_padding_width;
+		int left_pad = MAX(theme->window_titlebar_padding_width, corner_width / 2);
+		int right_pad = MAX(theme->window_titlebar_padding_width, corner_width / 2);
+		int x = left_pad;
 
 		/* Center vertically within titlebar */
 		int y = (theme->titlebar_height - theme->window_button_height) / 2;
@@ -98,7 +100,7 @@ ssd_titlebar_create(struct ssd *ssd)
 			x += theme->window_button_width + theme->window_button_spacing;
 		}
 
-		x = width - theme->window_titlebar_padding_width + theme->window_button_spacing;
+		x = width - right_pad + theme->window_button_spacing;
 		for (int b = rc.nr_title_buttons_right - 1; b >= 0; b--) {
 			x -= theme->window_button_width + theme->window_button_spacing;
 			enum lab_node_type type = rc.title_buttons_right[b];
@@ -316,7 +318,9 @@ ssd_titlebar_update(struct ssd *ssd)
 		wlr_scene_buffer_set_dest_size(subtree->bar,
 			MAX(width - bg_offset * 2, 0), theme->titlebar_height);
 
-		x = theme->window_titlebar_padding_width;
+		int left_pad = MAX(theme->window_titlebar_padding_width, corner_width / 2);
+		int right_pad = MAX(theme->window_titlebar_padding_width, corner_width / 2);
+		x = left_pad;
 		struct ssd_button *button;
 		wl_list_for_each(button, &subtree->buttons_left, link) {
 			wlr_scene_node_set_position(button->node, x, y);
@@ -327,7 +331,7 @@ ssd_titlebar_update(struct ssd *ssd)
 		wlr_scene_node_set_position(&subtree->corner_right->node,
 			x, -rc.theme->border_width);
 
-		x = width - theme->window_titlebar_padding_width + theme->window_button_spacing;
+		x = width - right_pad + theme->window_button_spacing;
 		wl_list_for_each(button, &subtree->buttons_right, link) {
 			x -= theme->window_button_width + theme->window_button_spacing;
 			wlr_scene_node_set_position(button->node, x, y);

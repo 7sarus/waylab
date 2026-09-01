@@ -111,6 +111,9 @@ struct rcxml {
 	int nr_title_buttons_right;
 
 	int corner_radius;
+	bool blur_enabled;
+	int blur_passes;
+	double blur_radius;
 	bool show_title;
 	bool title_layout_loaded;
 	bool ssd_keep_border;
