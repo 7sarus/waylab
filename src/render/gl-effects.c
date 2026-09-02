@@ -433,6 +433,17 @@ mat3_ortho(float *m, float left, float right, float bottom, float top)
 	m[8] = 1.0f;
 }
 
+static void
+restore_egl_context(EGLDisplay current_dpy, EGLDisplay prev_dpy,
+		EGLSurface prev_draw, EGLSurface prev_read, EGLContext prev_ctx)
+{
+	if (prev_dpy != EGL_NO_DISPLAY && prev_ctx != EGL_NO_CONTEXT) {
+		eglMakeCurrent(prev_dpy, prev_draw, prev_read, prev_ctx);
+	} else if (current_dpy != EGL_NO_DISPLAY) {
+		eglMakeCurrent(current_dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+	}
+}
+
 bool
 gl_effects_init(struct wlr_renderer *renderer)
 {
@@ -500,11 +511,11 @@ gl_effects_init(struct wlr_renderer *renderer)
 	gl_ctx.initialized = true;
 	wlr_log(WLR_INFO, "GL effects: shaders and blur pipeline successfully initialized");
 
-	eglMakeCurrent(prev_dpy, prev_draw, prev_read, prev_ctx);
+	restore_egl_context(dpy, prev_dpy, prev_draw, prev_read, prev_ctx);
 	return true;
 
 err_restore_egl:
-	eglMakeCurrent(prev_dpy, prev_draw, prev_read, prev_ctx);
+	restore_egl_context(dpy, prev_dpy, prev_draw, prev_read, prev_ctx);
 	return false;
 }
 
@@ -672,7 +683,7 @@ gl_effects_render_texture_rounded(
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 
 	glBindFramebuffer(GL_FRAMEBUFFER, prev_fbo);
-	eglMakeCurrent(prev_dpy, prev_draw, prev_read, prev_ctx);
+	restore_egl_context(dpy, prev_dpy, prev_draw, prev_read, prev_ctx);
 
 	return true;
 }
@@ -750,7 +761,7 @@ gl_effects_clip_view_corners(
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 
 	glBindFramebuffer(GL_FRAMEBUFFER, prev_fbo);
-	eglMakeCurrent(prev_dpy, prev_draw, prev_read, prev_ctx);
+	restore_egl_context(dpy, prev_dpy, prev_draw, prev_read, prev_ctx);
 
 	return true;
 }
@@ -838,7 +849,7 @@ gl_effects_capture_background(
 	glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, box->x, gl_y, box_w, box_h);
 
 	glBindFramebuffer(GL_FRAMEBUFFER, prev_fbo);
-	eglMakeCurrent(prev_dpy, prev_draw, prev_read, prev_ctx);
+	restore_egl_context(dpy, prev_dpy, prev_draw, prev_read, prev_ctx);
 	return true;
 }
 
@@ -1036,7 +1047,7 @@ gl_effects_apply_dual_kawase_blur(
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 
 	glBindFramebuffer(GL_FRAMEBUFFER, prev_fbo);
-	eglMakeCurrent(prev_dpy, prev_draw, prev_read, prev_ctx);
+	restore_egl_context(dpy, prev_dpy, prev_draw, prev_read, prev_ctx);
 	return true;
 }
 
