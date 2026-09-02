@@ -12,6 +12,7 @@
 #include "magnifier.h"
 #include "output.h"
 #include "ssd.h"
+#include "ssd-internal.h"
 #include "theme.h"
 #include "view.h"
 
@@ -97,6 +98,22 @@ scene_output_damage(struct wlr_scene_output *scene_output,
 	pixman_region32_fini(&clipped);
 }
 
+struct opacity_save_state {
+	struct wlr_scene_buffer *buffers[1024];
+	float opacities[1024];
+	int count;
+};
+
+static void save_and_clear_opacity(struct wlr_scene_buffer *buffer, int sx, int sy, void *data) {
+	struct opacity_save_state *state = data;
+	if (state->count < 1024) {
+		state->buffers[state->count] = buffer;
+		state->opacities[state->count] = buffer->opacity;
+		state->count++;
+	}
+	buffer->opacity = 0.0f;
+}
+
 /*
  * This is a copy of wlr_scene_output_commit()
  * as it doesn't use the pending state at all.
@@ -121,14 +138,20 @@ lab_wlr_scene_output_commit(struct wlr_scene_output *scene_output,
 		return true;
 	}
 
-	bool has_effects = (state->buffer && gl_effects_is_available() && (rc.blur_enabled || rc.corner_radius > 0));
+	bool has_effects = (gl_effects_is_available() && (rc.blur_enabled || rc.corner_radius > 0));
+
+	struct opacity_save_state op_state = { .count = 0 };
 
 	if (has_effects) {
-		/* Temporarily disable content_tree nodes so wlroots scene does not draw rectangular buffers */
+		/* Force full swapchain buffer damage so no stale window pixels from past double/triple buffers are captured */
+		wlr_damage_ring_add_whole(&scene_output->damage_ring);
+
+		/* Temporarily make content_tree nodes transparent so wlroots scene does not draw rectangular buffers,
+		 * while still collecting damage and sending frame_done events. */
 		struct view *view;
 		for_each_view(view, &server.views, LAB_VIEW_CRITERIA_CURRENT_WORKSPACE) {
 			if (view->mapped && !view->shaded && view->maximized == VIEW_AXIS_NONE && !view->fullscreen && view->content_tree) {
-				wlr_scene_node_set_enabled(&view->content_tree->node, false);
+				wlr_scene_node_for_each_buffer(&view->content_tree->node, save_and_clear_opacity, &op_state);
 			}
 		}
 	}
@@ -140,12 +163,9 @@ lab_wlr_scene_output_commit(struct wlr_scene_output *scene_output,
 	}
 
 	if (has_effects) {
-		/* Re-enable content_tree nodes for scene-graph tracking & input events */
-		struct view *view;
-		for_each_view(view, &server.views, LAB_VIEW_CRITERIA_CURRENT_WORKSPACE) {
-			if (view->mapped && !view->shaded && view->maximized == VIEW_AXIS_NONE && !view->fullscreen && view->content_tree) {
-				wlr_scene_node_set_enabled(&view->content_tree->node, true);
-			}
+		/* Restore original opacities */
+		for (int i = 0; i < op_state.count; i++) {
+			op_state.buffers[i]->opacity = op_state.opacities[i];
 		}
 	}
 
@@ -158,46 +178,39 @@ lab_wlr_scene_output_commit(struct wlr_scene_output *scene_output,
 	struct wlr_box additional_damage = {0};
 	if (state->buffer && gl_effects_is_available() && (rc.blur_enabled || rc.corner_radius > 0)) {
 		struct view *view;
-		for_each_view(view, &server.views, LAB_VIEW_CRITERIA_CURRENT_WORKSPACE) {
-			if (!view->mapped || view->shaded || view->maximized != VIEW_AXIS_NONE || view->fullscreen) {
+		/* Iterate back to front (bottom of stack to top) for correct z-order composition */
+		for_each_view_reverse(view, &server.views, LAB_VIEW_CRITERIA_CURRENT_WORKSPACE) {
+			if (!view->mapped || view->shaded || view->maximized != VIEW_AXIS_NONE || view->fullscreen || !view->content_tree) {
 				continue;
 			}
-			struct border margin = ssd_get_margin(view->ssd);
-			struct wlr_box box = {
-				.x = view->current.x - margin.left,
-				.y = view->current.y - margin.top,
-				.width = view->current.width + margin.left + margin.right,
-				.height = view->current.height + margin.top + margin.bottom,
+			float inner_r = MAX(rc.corner_radius - rc.theme->border_width, 0.0f) * wlr_output->scale;
+			struct wlr_box content_box = {
+				.x = (view->current.x - scene_output->x) * wlr_output->scale,
+				.y = (view->current.y - scene_output->y) * wlr_output->scale,
+				.width = view->current.width * wlr_output->scale,
+				.height = view->current.height * wlr_output->scale,
 			};
-			box.x -= scene_output->x;
-			box.y -= scene_output->y;
-			box.x *= wlr_output->scale;
-			box.y *= wlr_output->scale;
-			box.width *= wlr_output->scale;
-			box.height *= wlr_output->scale;
 
-			float r = rc.corner_radius * wlr_output->scale;
 			if (rc.blur_enabled) {
 				gl_effects_apply_dual_kawase_blur(
 					server.renderer,
 					state->buffer,
-					&box,
-					r,
+					&content_box,
+					inner_r,
 					rc.blur_passes,
 					rc.blur_radius,
 					rc.blur_enabled);
 			}
 
-			if (rc.corner_radius > 0 && view->content_tree) {
-				float inner_r = MAX(rc.corner_radius - rc.theme->border_width, 0.0f) * wlr_output->scale;
-				int view_off_x = (view->current.x - scene_output->x) * wlr_output->scale;
-				int view_off_y = (view->current.y - scene_output->y) * wlr_output->scale;
+			if (rc.corner_radius > 0) {
 				gl_effects_render_view_content(
 					server.renderer,
 					state->buffer,
 					view,
-					view_off_x,
-					view_off_y,
+					&content_box,
+					scene_output->x,
+					scene_output->y,
+					wlr_output->scale,
 					inner_r,
 					1.0f);
 			}

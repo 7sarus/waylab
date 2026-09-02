@@ -33,6 +33,7 @@ bool gl_effects_render_texture_rounded(
 	struct wlr_texture *texture,
 	const struct wlr_fbox *src_box,
 	const struct wlr_box *dst_box,
+	const struct wlr_box *window_box,
 	float corner_radius,
 	float alpha,
 	enum wl_output_transform transform);
@@ -75,8 +76,10 @@ bool gl_effects_render_view_content(
 	struct wlr_renderer *renderer,
 	struct wlr_buffer *dst_buffer,
 	struct view *view,
-	int offset_x,
-	int offset_y,
+	const struct wlr_box *content_box,
+	int scene_output_x,
+	int scene_output_y,
+	float scale,
 	float corner_radius,
 	float alpha);
 
