@@ -77,6 +77,16 @@ struct clip_prog {
 	GLint u_radius;
 };
 
+struct rect_prog {
+	GLuint program;
+	GLint a_position;
+	GLint u_proj;
+	GLint u_color;
+	GLint u_window_pos;
+	GLint u_window_size;
+	GLint u_radius;
+};
+
 struct blur_fbo {
 	GLuint fbo;
 	GLuint texture;
@@ -91,6 +101,7 @@ static struct {
 	struct shader_prog prog_2d;
 	struct shader_prog prog_external;
 	struct clip_prog prog_clip;
+	struct rect_prog prog_rect;
 	struct blur_down_prog prog_blur_down;
 	struct blur_up_prog prog_blur_up;
 	struct blur_composite_prog prog_blur_composite;
@@ -130,6 +141,30 @@ static const char *clip_frag_src =
 	"    }\n"
 	"    float alpha = clamp(dist + 0.5, 0.0, 1.0);\n"
 	"    gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0 - alpha);\n"
+	"}\n";
+
+static const char *frag_shader_rect_rounded_src =
+	"precision mediump float;\n"
+	"varying vec2 v_pos;\n"
+	"uniform vec4 color;\n"
+	"uniform vec2 window_pos;\n"
+	"uniform vec2 window_size;\n"
+	"uniform float radius;\n"
+	"\n"
+	"float rounded_box_sdf(vec2 p, vec2 half_size, float r) {\n"
+	"    vec2 d = abs(p) - half_size + vec2(r);\n"
+	"    return min(max(d.x, d.y), 0.0) + length(max(d, 0.0)) - r;\n"
+	"}\n"
+	"\n"
+	"void main() {\n"
+	"    vec2 half_size = window_size * 0.5;\n"
+	"    vec2 p = v_pos - (window_pos + half_size);\n"
+	"    float dist = rounded_box_sdf(p, half_size, radius);\n"
+	"    if (dist > 0.5) {\n"
+	"        discard;\n"
+	"    }\n"
+	"    float a = 1.0 - clamp(dist + 0.5, 0.0, 1.0);\n"
+	"    gl_FragColor = color * a;\n"
 	"}\n";
 
 /* Dual-Kawase Blur Downsample Shader */
@@ -193,12 +228,12 @@ static const char *blur_composite_frag_src =
 	"    vec2 half_size = window_size * 0.5;\n"
 	"    vec2 p = v_pos - (window_pos + half_size);\n"
 	"    float dist = rounded_box_sdf(p, half_size, radius);\n"
-	"    float edge_alpha = smoothstep(1.0, 0.0, dist);\n"
+	"    float edge_alpha = smoothstep(1.5, -0.5, dist);\n"
 	"    if (edge_alpha <= 0.0) {\n"
 	"        discard;\n"
 	"    }\n"
 	"    vec4 c = texture2D(tex_blur, v_texcoord);\n"
-	"    gl_FragColor = vec4(c.rgb, c.a * edge_alpha);\n"
+	"    gl_FragColor = c * edge_alpha;\n"
 	"}\n";
 
 static const char *vertex_shader_src =
@@ -369,6 +404,21 @@ init_clip_prog(struct clip_prog *cp, const char *vert_src, const char *frag_src)
 }
 
 static bool
+init_rect_prog(struct rect_prog *rp, const char *vert_src, const char *frag_src)
+{
+	if (!link_program(&rp->program, vert_src, frag_src)) {
+		return false;
+	}
+	rp->a_position = glGetAttribLocation(rp->program, "position");
+	rp->u_proj = glGetUniformLocation(rp->program, "proj");
+	rp->u_color = glGetUniformLocation(rp->program, "color");
+	rp->u_window_pos = glGetUniformLocation(rp->program, "window_pos");
+	rp->u_window_size = glGetUniformLocation(rp->program, "window_size");
+	rp->u_radius = glGetUniformLocation(rp->program, "radius");
+	return true;
+}
+
+static bool
 init_blur_down_prog(struct blur_down_prog *bp, const char *vert_src, const char *frag_src)
 {
 	if (!link_program(&bp->program, vert_src, frag_src)) {
@@ -491,6 +541,11 @@ gl_effects_init(struct wlr_renderer *renderer)
 		goto err_restore_egl;
 	}
 
+	if (!init_rect_prog(&gl_ctx.prog_rect, clip_vert_src, frag_shader_rect_rounded_src)) {
+		wlr_log(WLR_ERROR, "Failed to initialize rect shader");
+		goto err_restore_egl;
+	}
+
 	if (!init_blur_down_prog(&gl_ctx.prog_blur_down, vertex_shader_src, blur_down_frag_src)) {
 		wlr_log(WLR_ERROR, "Failed to initialize blur downsample shader");
 		goto err_restore_egl;
@@ -575,6 +630,112 @@ gl_effects_is_available(void)
 	return gl_ctx.initialized;
 }
 
+static bool
+check_gl_error(const char *op)
+{
+	GLenum err = glGetError();
+	if (err != GL_NO_ERROR) {
+		wlr_log(WLR_ERROR, "GL error 0x%04x during %s", err, op);
+		return false;
+	}
+	return true;
+}
+
+bool
+gl_effects_render_rect_rounded(
+	struct wlr_renderer *renderer,
+	struct wlr_buffer *dst_buffer,
+	const struct wlr_box *dst_box,
+	const float color[static 4],
+	const struct wlr_box *window_box,
+	float corner_radius)
+{
+	if (!gl_ctx.initialized || !renderer || !dst_buffer || !dst_box || !window_box) {
+		return false;
+	}
+	if (!wlr_renderer_is_gles2(renderer)) {
+		wlr_log(WLR_ERROR, "gl_effects_render_rect_rounded: renderer is not GLES2");
+		return false;
+	}
+
+	GLuint fbo = wlr_gles2_renderer_get_buffer_fbo(renderer, dst_buffer);
+	if (!fbo) {
+		wlr_log(WLR_ERROR, "gl_effects_render_rect_rounded: failed to get buffer FBO");
+		return false;
+	}
+
+	struct rect_prog *prog = &gl_ctx.prog_rect;
+	if (!prog->program) {
+		wlr_log(WLR_ERROR, "gl_effects_render_rect_rounded: program not initialized");
+		return false;
+	}
+
+	EGLDisplay dpy = wlr_egl_get_display(gl_ctx.egl);
+	EGLContext ctx = wlr_egl_get_context(gl_ctx.egl);
+	EGLDisplay prev_dpy = eglGetCurrentDisplay();
+	EGLContext prev_ctx = eglGetCurrentContext();
+	EGLSurface prev_draw = eglGetCurrentSurface(EGL_DRAW);
+	EGLSurface prev_read = eglGetCurrentSurface(EGL_READ);
+
+	if (!eglMakeCurrent(dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, ctx)) {
+		wlr_log(WLR_ERROR, "gl_effects_render_rect_rounded: eglMakeCurrent failed");
+		return false;
+	}
+
+	GLint prev_fbo;
+	glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prev_fbo);
+	glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+
+	glViewport(0, 0, dst_buffer->width, dst_buffer->height);
+
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+
+	glUseProgram(prog->program);
+
+	float proj[9];
+	mat3_ortho(proj, 0.0f, (float)dst_buffer->width, (float)dst_buffer->height, 0.0f);
+	glUniformMatrix3fv(prog->u_proj, 1, GL_FALSE, proj);
+
+	float x1 = (float)dst_box->x;
+	float y1 = (float)dst_box->y;
+	float x2 = x1 + (float)dst_box->width;
+	float y2 = y1 + (float)dst_box->height;
+
+	float vertices[] = {
+		/* pos_x, pos_y */
+		x1, y1,
+		x2, y1,
+		x1, y2,
+		x2, y2,
+	};
+
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+	glVertexAttribPointer(prog->a_position, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), vertices);
+	glEnableVertexAttribArray(prog->a_position);
+
+	/* wlroots colors are not premultiplied, but we output premultiplied */
+	glUniform4f(prog->u_color, color[0] * color[3], color[1] * color[3], color[2] * color[3], color[3]);
+
+	glUniform2f(prog->u_window_pos, (float)window_box->x, (float)window_box->y);
+	glUniform2f(prog->u_window_size, (float)window_box->width, (float)window_box->height);
+	glUniform1f(prog->u_radius, corner_radius);
+
+	glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+	glFlush();
+	check_gl_error("gl_effects_render_rect_rounded draw");
+
+	glDisableVertexAttribArray(prog->a_position);
+	glDisable(GL_BLEND);
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+	glBindFramebuffer(GL_FRAMEBUFFER, prev_fbo);
+	restore_egl_context(dpy, prev_dpy, prev_draw, prev_read, prev_ctx);
+
+	return true;
+}
+
 bool
 gl_effects_render_texture_rounded(
 	struct wlr_renderer *renderer,
@@ -587,15 +748,17 @@ gl_effects_render_texture_rounded(
 	float alpha,
 	enum wl_output_transform transform)
 {
-	if (!gl_ctx.initialized || !renderer || !dst_buffer || !texture) {
+	if (!gl_ctx.initialized || !renderer || !dst_buffer || !texture || !dst_box || !window_box) {
 		return false;
 	}
 	if (!wlr_renderer_is_gles2(renderer) || !wlr_texture_is_gles2(texture)) {
+		wlr_log(WLR_ERROR, "gl_effects_render_texture_rounded: renderer or texture is not GLES2");
 		return false;
 	}
 
 	GLuint fbo = wlr_gles2_renderer_get_buffer_fbo(renderer, dst_buffer);
 	if (!fbo) {
+		wlr_log(WLR_ERROR, "gl_effects_render_texture_rounded: failed to get buffer FBO");
 		return false;
 	}
 
@@ -605,9 +768,15 @@ gl_effects_render_texture_rounded(
 	struct shader_prog *prog = &gl_ctx.prog_2d;
 	if (attribs.target == GL_TEXTURE_EXTERNAL_OES) {
 		if (!gl_ctx.has_external_oes || !gl_ctx.prog_external.program) {
+			wlr_log(WLR_ERROR, "gl_effects_render_texture_rounded: missing external OES support/program");
 			return false;
 		}
 		prog = &gl_ctx.prog_external;
+	}
+
+	if (!prog->program) {
+		wlr_log(WLR_ERROR, "gl_effects_render_texture_rounded: program not initialized");
+		return false;
 	}
 
 	EGLDisplay dpy = wlr_egl_get_display(gl_ctx.egl);
@@ -618,6 +787,7 @@ gl_effects_render_texture_rounded(
 	EGLSurface prev_read = eglGetCurrentSurface(EGL_READ);
 
 	if (!eglMakeCurrent(dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, ctx)) {
+		wlr_log(WLR_ERROR, "gl_effects_render_texture_rounded: eglMakeCurrent failed");
 		return false;
 	}
 
@@ -642,25 +812,82 @@ gl_effects_render_texture_rounded(
 	float y2 = y1 + (float)dst_box->height;
 
 	float s1 = src_box ? (float)src_box->x / texture->width : 0.0f;
-	float t1 = src_box ? (float)src_box->y / texture->height : 0.0f;
+	float t1 = src_box ? 1.0f - (float)src_box->y / texture->height : 1.0f;
 	float s2 = src_box ? (float)(src_box->x + src_box->width) / texture->width : 1.0f;
-	float t2 = src_box ? (float)(src_box->y + src_box->height) / texture->height : 1.0f;
+	float t2 = src_box ? 1.0f - (float)(src_box->y + src_box->height) / texture->height : 0.0f;
+
+	float texcoord[4][2];
+	switch (transform) {
+	case WL_OUTPUT_TRANSFORM_NORMAL:
+		texcoord[0][0] = s1; texcoord[0][1] = t1;
+		texcoord[1][0] = s2; texcoord[1][1] = t1;
+		texcoord[2][0] = s1; texcoord[2][1] = t2;
+		texcoord[3][0] = s2; texcoord[3][1] = t2;
+		break;
+	case WL_OUTPUT_TRANSFORM_90:
+		texcoord[0][0] = s2; texcoord[0][1] = t1;
+		texcoord[1][0] = s2; texcoord[1][1] = t2;
+		texcoord[2][0] = s1; texcoord[2][1] = t1;
+		texcoord[3][0] = s1; texcoord[3][1] = t2;
+		break;
+	case WL_OUTPUT_TRANSFORM_180:
+		texcoord[0][0] = s2; texcoord[0][1] = t2;
+		texcoord[1][0] = s1; texcoord[1][1] = t2;
+		texcoord[2][0] = s2; texcoord[2][1] = t1;
+		texcoord[3][0] = s1; texcoord[3][1] = t1;
+		break;
+	case WL_OUTPUT_TRANSFORM_270:
+		texcoord[0][0] = s1; texcoord[0][1] = t2;
+		texcoord[1][0] = s1; texcoord[1][1] = t1;
+		texcoord[2][0] = s2; texcoord[2][1] = t2;
+		texcoord[3][0] = s2; texcoord[3][1] = t1;
+		break;
+	case WL_OUTPUT_TRANSFORM_FLIPPED:
+		texcoord[0][0] = s2; texcoord[0][1] = t1;
+		texcoord[1][0] = s1; texcoord[1][1] = t1;
+		texcoord[2][0] = s2; texcoord[2][1] = t2;
+		texcoord[3][0] = s1; texcoord[3][1] = t2;
+		break;
+	case WL_OUTPUT_TRANSFORM_FLIPPED_90:
+		texcoord[0][0] = s1; texcoord[0][1] = t1;
+		texcoord[1][0] = s1; texcoord[1][1] = t2;
+		texcoord[2][0] = s2; texcoord[2][1] = t1;
+		texcoord[3][0] = s2; texcoord[3][1] = t2;
+		break;
+	case WL_OUTPUT_TRANSFORM_FLIPPED_180:
+		texcoord[0][0] = s1; texcoord[0][1] = t2;
+		texcoord[1][0] = s2; texcoord[1][1] = t2;
+		texcoord[2][0] = s1; texcoord[2][1] = t1;
+		texcoord[3][0] = s2; texcoord[3][1] = t1;
+		break;
+	case WL_OUTPUT_TRANSFORM_FLIPPED_270:
+		texcoord[0][0] = s2; texcoord[0][1] = t2;
+		texcoord[1][0] = s2; texcoord[1][1] = t1;
+		texcoord[2][0] = s1; texcoord[2][1] = t2;
+		texcoord[3][0] = s1; texcoord[3][1] = t1;
+		break;
+	default:
+		texcoord[0][0] = s1; texcoord[0][1] = t1;
+		texcoord[1][0] = s2; texcoord[1][1] = t1;
+		texcoord[2][0] = s1; texcoord[2][1] = t2;
+		texcoord[3][0] = s2; texcoord[3][1] = t2;
+		break;
+	}
 
 	float vertices[] = {
 		/* pos_x, pos_y, tex_u, tex_v */
-		x1, y1, s1, t2,
-		x2, y1, s2, t2,
-		x1, y2, s1, t1,
-		x2, y2, s2, t1,
+		x1, y1, texcoord[0][0], texcoord[0][1],
+		x2, y1, texcoord[1][0], texcoord[1][1],
+		x1, y2, texcoord[2][0], texcoord[2][1],
+		x2, y2, texcoord[3][0], texcoord[3][1],
 	};
 
-	glBindBuffer(GL_ARRAY_BUFFER, gl_ctx.quad_vbo);
-	glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_DYNAMIC_DRAW);
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
 
+	glVertexAttribPointer(prog->a_position, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), vertices);
+	glVertexAttribPointer(prog->a_texcoord, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), &vertices[2]);
 	glEnableVertexAttribArray(prog->a_position);
-	glVertexAttribPointer(prog->a_position, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void *)0);
 	glEnableVertexAttribArray(prog->a_texcoord);
-	glVertexAttribPointer(prog->a_texcoord, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void *)(2 * sizeof(float)));
 
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(attribs.target, attribs.tex);
@@ -674,8 +901,8 @@ gl_effects_render_texture_rounded(
 	glUniform1f(prog->u_alpha, alpha);
 
 	glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-
 	glFlush();
+	check_gl_error("gl_effects_render_texture_rounded draw");
 
 	glDisableVertexAttribArray(prog->a_position);
 	glDisableVertexAttribArray(prog->a_texcoord);
@@ -749,11 +976,10 @@ gl_effects_clip_view_corners(
 		x2, y2,
 	};
 
-	glBindBuffer(GL_ARRAY_BUFFER, gl_ctx.quad_vbo);
-	glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_DYNAMIC_DRAW);
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
 
+	glVertexAttribPointer(gl_ctx.prog_clip.a_position, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), vertices);
 	glEnableVertexAttribArray(gl_ctx.prog_clip.a_position);
-	glVertexAttribPointer(gl_ctx.prog_clip.a_position, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void *)0);
 
 	glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
@@ -899,15 +1125,41 @@ gl_effects_apply_dual_kawase_blur(
 	GLint prev_fbo;
 	glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prev_fbo);
 
-	int box_w = box->width;
-	int box_h = box->height;
+	int cap_x = box->x;
+	int cap_y = box->y;
+	int cap_w = box->width;
+	int cap_h = box->height;
+
+	if (cap_x < 0) {
+		cap_w += cap_x;
+		cap_x = 0;
+	}
+	if (cap_y < 0) {
+		cap_h += cap_y;
+		cap_y = 0;
+	}
+	if (cap_x + cap_w > target_buffer->width) {
+		cap_w = target_buffer->width - cap_x;
+	}
+	if (cap_y + cap_h > target_buffer->height) {
+		cap_h = target_buffer->height - cap_y;
+	}
+
+	if (cap_w <= 0 || cap_h <= 0) {
+		restore_egl_context(dpy, prev_dpy, prev_draw, prev_read, prev_ctx);
+		return true;
+	}
+
+	int box_w = cap_w;
+	int box_h = cap_h;
 
 	/* Always capture from current main_fbo */
 	ensure_fbo_struct(&gl_ctx.fbo_bg, box_w, box_h);
 	glBindFramebuffer(GL_FRAMEBUFFER, main_fbo);
 	glBindTexture(GL_TEXTURE_2D, gl_ctx.fbo_bg.texture);
-	int gl_y = target_buffer->height - (box->y + box->height);
-	glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, box->x, gl_y, box_w, box_h);
+	int gl_y = target_buffer->height - (cap_y + cap_h);
+	glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, cap_x, gl_y, box_w, box_h);
+	check_gl_error("glCopyTexSubImage2D blur capture");
 
 	/* Prepare quad vertices for offscreen FBO rendering */
 	float quad_verts[] = {
@@ -916,8 +1168,7 @@ gl_effects_apply_dual_kawase_blur(
 		-1.0f,  1.0f, 0.0f, 1.0f,
 		 1.0f,  1.0f, 1.0f, 1.0f,
 	};
-	glBindBuffer(GL_ARRAY_BUFFER, gl_ctx.quad_vbo);
-	glBufferData(GL_ARRAY_BUFFER, sizeof(quad_verts), quad_verts, GL_DYNAMIC_DRAW);
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
 
 	float identity_proj[9] = {
 		1.0f, 0.0f, 0.0f,
@@ -931,10 +1182,11 @@ gl_effects_apply_dual_kawase_blur(
 		/* 1. Downsample Passes from fbo_bg into chain */
 		glUseProgram(gl_ctx.prog_blur_down.program);
 		glUniformMatrix3fv(gl_ctx.prog_blur_down.u_proj, 1, GL_FALSE, identity_proj);
+		
+		glVertexAttribPointer(gl_ctx.prog_blur_down.a_position, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), quad_verts);
+		glVertexAttribPointer(gl_ctx.prog_blur_down.a_texcoord, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), &quad_verts[2]);
 		glEnableVertexAttribArray(gl_ctx.prog_blur_down.a_position);
 		glEnableVertexAttribArray(gl_ctx.prog_blur_down.a_texcoord);
-		glVertexAttribPointer(gl_ctx.prog_blur_down.a_position, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void *)0);
-		glVertexAttribPointer(gl_ctx.prog_blur_down.a_texcoord, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void *)(2 * sizeof(float)));
 
 		int cur_w = box_w;
 		int cur_h = box_h;
@@ -966,10 +1218,10 @@ gl_effects_apply_dual_kawase_blur(
 		/* 2. Upsample Passes back to chain[0] */
 		glUseProgram(gl_ctx.prog_blur_up.program);
 		glUniformMatrix3fv(gl_ctx.prog_blur_up.u_proj, 1, GL_FALSE, identity_proj);
+		glVertexAttribPointer(gl_ctx.prog_blur_up.a_position, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), quad_verts);
+		glVertexAttribPointer(gl_ctx.prog_blur_up.a_texcoord, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), &quad_verts[2]);
 		glEnableVertexAttribArray(gl_ctx.prog_blur_up.a_position);
 		glEnableVertexAttribArray(gl_ctx.prog_blur_up.a_texcoord);
-		glVertexAttribPointer(gl_ctx.prog_blur_up.a_position, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void *)0);
-		glVertexAttribPointer(gl_ctx.prog_blur_up.a_texcoord, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void *)(2 * sizeof(float)));
 
 		ensure_blur_fbo(0, box_w, box_h);
 
@@ -1020,13 +1272,12 @@ gl_effects_apply_dual_kawase_blur(
 		x2, y2, 1.0f, 0.0f,
 	};
 
-	glBindBuffer(GL_ARRAY_BUFFER, gl_ctx.quad_vbo);
-	glBufferData(GL_ARRAY_BUFFER, sizeof(comp_vertices), comp_vertices, GL_DYNAMIC_DRAW);
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
 
+	glVertexAttribPointer(gl_ctx.prog_blur_composite.a_position, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), comp_vertices);
+	glVertexAttribPointer(gl_ctx.prog_blur_composite.a_texcoord, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), &comp_vertices[2]);
 	glEnableVertexAttribArray(gl_ctx.prog_blur_composite.a_position);
 	glEnableVertexAttribArray(gl_ctx.prog_blur_composite.a_texcoord);
-	glVertexAttribPointer(gl_ctx.prog_blur_composite.a_position, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void *)0);
-	glVertexAttribPointer(gl_ctx.prog_blur_composite.a_texcoord, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void *)(2 * sizeof(float)));
 
 	if (blur_enabled && gl_ctx.fbo_chain[0].texture) {
 		glActiveTexture(GL_TEXTURE0);
@@ -1039,8 +1290,8 @@ gl_effects_apply_dual_kawase_blur(
 	glUniform1f(gl_ctx.prog_blur_composite.u_radius, corner_radius);
 
 	glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-
 	glFlush();
+	check_gl_error("gl_effects_apply_dual_kawase_blur composite");
 
 	glDisableVertexAttribArray(gl_ctx.prog_blur_composite.a_position);
 	glDisableVertexAttribArray(gl_ctx.prog_blur_composite.a_texcoord);
@@ -1088,6 +1339,10 @@ render_scene_buffer_rounded_tree(
 			texture = client_buffer->texture;
 		}
 		if (!texture) {
+			texture = wlr_texture_from_buffer(renderer, scene_buffer->buffer);
+		}
+		if (!texture) {
+			wlr_log(WLR_ERROR, "gl-effects: failed to obtain texture for buffer %p", scene_buffer->buffer);
 			break;
 		}
 
@@ -1115,6 +1370,29 @@ render_scene_buffer_rounded_tree(
 			scene_buffer->transform);
 		break;
 	}
+	case WLR_SCENE_NODE_RECT: {
+		struct wlr_scene_rect *scene_rect = wlr_scene_rect_from_node(node);
+		int lx, ly;
+		if (!wlr_scene_node_coords(node, &lx, &ly)) {
+			break;
+		}
+
+		struct wlr_box surface_dst = {
+			.x = (int)roundf((float)(lx - scene_output_x) * scale),
+			.y = (int)roundf((float)(ly - scene_output_y) * scale),
+			.width = (int)roundf((float)scene_rect->width * scale),
+			.height = (int)roundf((float)scene_rect->height * scale),
+		};
+
+		gl_effects_render_rect_rounded(
+			renderer,
+			dst_buffer,
+			&surface_dst,
+			scene_rect->color,
+			window_box,
+			corner_radius);
+		break;
+	}
 	default:
 		break;
 	}
@@ -1139,7 +1417,7 @@ gl_effects_render_view_content(
 	render_scene_buffer_rounded_tree(
 		renderer,
 		dst_buffer,
-		&view->content_tree->node,
+		&view->scene_tree->node,
 		scene_output_x,
 		scene_output_y,
 		scale,

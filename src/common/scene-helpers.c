@@ -98,20 +98,66 @@ scene_output_damage(struct wlr_scene_output *scene_output,
 	pixman_region32_fini(&clipped);
 }
 
-struct opacity_save_state {
-	struct wlr_scene_buffer *buffers[1024];
-	float opacities[1024];
-	int count;
+
+#define MAX_NODES 4096
+
+struct node_state {
+	struct wlr_scene_node *node;
+	float opacity;
+	float color[4];
 };
 
-static void save_and_clear_opacity(struct wlr_scene_buffer *buffer, int sx, int sy, void *data) {
-	struct opacity_save_state *state = data;
-	if (state->count < 1024) {
-		state->buffers[state->count] = buffer;
-		state->opacities[state->count] = buffer->opacity;
-		state->count++;
+static struct node_state saved_states[MAX_NODES];
+static int saved_count = 0;
+
+static void
+hide_recursive(struct wlr_scene_node *node)
+{
+	if (!node || !node->enabled) {
+		return;
 	}
-	buffer->opacity = 0.0f;
+
+	if (saved_count < MAX_NODES) {
+		if (node->type == WLR_SCENE_NODE_BUFFER) {
+			struct wlr_scene_buffer *buffer = wlr_scene_buffer_from_node(node);
+			saved_states[saved_count].node = node;
+			saved_states[saved_count].opacity = buffer->opacity;
+			buffer->opacity = 0.0f;
+			saved_count++;
+		} else if (node->type == WLR_SCENE_NODE_RECT) {
+			struct wlr_scene_rect *rect = wlr_scene_rect_from_node(node);
+			saved_states[saved_count].node = node;
+			memcpy(saved_states[saved_count].color, rect->color, sizeof(float) * 4);
+			rect->color[3] = 0.0f;
+			saved_count++;
+		}
+	} else {
+		wlr_log(WLR_ERROR, "hide_recursive: saved_states overflow (%d)", saved_count);
+	}
+
+	if (node->type == WLR_SCENE_NODE_TREE) {
+		struct wlr_scene_tree *tree = wlr_scene_tree_from_node(node);
+		struct wlr_scene_node *child;
+		wl_list_for_each(child, &tree->children, link) {
+			hide_recursive(child);
+		}
+	}
+}
+
+static void
+restore_nodes(void)
+{
+	for (int i = saved_count - 1; i >= 0; i--) {
+		struct wlr_scene_node *n = saved_states[i].node;
+		if (n->type == WLR_SCENE_NODE_BUFFER) {
+			struct wlr_scene_buffer *buffer = wlr_scene_buffer_from_node(n);
+			buffer->opacity = saved_states[i].opacity;
+		} else if (n->type == WLR_SCENE_NODE_RECT) {
+			struct wlr_scene_rect *rect = wlr_scene_rect_from_node(n);
+			memcpy(rect->color, saved_states[i].color, sizeof(float) * 4);
+		}
+	}
+	saved_count = 0;
 }
 
 /*
@@ -140,18 +186,13 @@ lab_wlr_scene_output_commit(struct wlr_scene_output *scene_output,
 
 	bool has_effects = (gl_effects_is_available() && (rc.blur_enabled || rc.corner_radius > 0));
 
-	struct opacity_save_state op_state = { .count = 0 };
-
 	if (has_effects) {
-		/* Force full swapchain buffer damage so no stale window pixels from past double/triple buffers are captured */
-		wlr_damage_ring_add_whole(&scene_output->damage_ring);
-
-		/* Temporarily make content_tree nodes transparent so wlroots scene does not draw rectangular buffers,
-		 * while still collecting damage and sending frame_done events. */
+		/* Temporarily make all window nodes transparent so wlroots scene does not draw rectangular buffers,
+		 * while still allowing wlroots to accurately track damage and send frame_done events. */
 		struct view *view;
 		for_each_view(view, &server.views, LAB_VIEW_CRITERIA_CURRENT_WORKSPACE) {
 			if (view->mapped && !view->shaded && view->maximized == VIEW_AXIS_NONE && !view->fullscreen && view->content_tree) {
-				wlr_scene_node_for_each_buffer(&view->content_tree->node, save_and_clear_opacity, &op_state);
+				hide_recursive(&view->scene_tree->node);
 			}
 		}
 	}
@@ -163,10 +204,8 @@ lab_wlr_scene_output_commit(struct wlr_scene_output *scene_output,
 	}
 
 	if (has_effects) {
-		/* Restore original opacities */
-		for (int i = 0; i < op_state.count; i++) {
-			op_state.buffers[i]->opacity = op_state.opacities[i];
-		}
+		/* Restore original visibility */
+		restore_nodes();
 	}
 
 	if (state->tearing_page_flip) {
@@ -176,6 +215,7 @@ lab_wlr_scene_output_commit(struct wlr_scene_output *scene_output,
 	}
 
 	struct wlr_box additional_damage = {0};
+
 	if (state->buffer && gl_effects_is_available() && (rc.blur_enabled || rc.corner_radius > 0)) {
 		struct view *view;
 		/* Iterate back to front (bottom of stack to top) for correct z-order composition */
@@ -183,36 +223,49 @@ lab_wlr_scene_output_commit(struct wlr_scene_output *scene_output,
 			if (!view->mapped || view->shaded || view->maximized != VIEW_AXIS_NONE || view->fullscreen || !view->content_tree) {
 				continue;
 			}
+			struct border margin = ssd_thickness(view);
+			float outer_r = rc.corner_radius * wlr_output->scale;
 			float inner_r = MAX(rc.corner_radius - rc.theme->border_width, 0.0f) * wlr_output->scale;
 			struct wlr_box content_box = {
-				.x = (view->current.x - scene_output->x) * wlr_output->scale,
-				.y = (view->current.y - scene_output->y) * wlr_output->scale,
-				.width = view->current.width * wlr_output->scale,
-				.height = view->current.height * wlr_output->scale,
+				.x = (int)roundf((view->current.x - scene_output->x) * wlr_output->scale),
+				.y = (int)roundf((view->current.y - scene_output->y) * wlr_output->scale),
+				.width = (int)roundf(view->current.width * wlr_output->scale),
+				.height = (int)roundf(view->current.height * wlr_output->scale),
+			};
+			struct wlr_box window_box = {
+				.x = (int)roundf((view->current.x - margin.left - scene_output->x) * wlr_output->scale),
+				.y = (int)roundf((view->current.y - margin.top - scene_output->y) * wlr_output->scale),
+				.width = (int)roundf((view->current.width + margin.left + margin.right) * wlr_output->scale),
+				.height = (int)roundf((view->current.height + margin.top + margin.bottom) * wlr_output->scale),
 			};
 
+
 			if (rc.blur_enabled) {
-				gl_effects_apply_dual_kawase_blur(
+				if (!gl_effects_apply_dual_kawase_blur(
 					server.renderer,
 					state->buffer,
 					&content_box,
 					inner_r,
 					rc.blur_passes,
 					rc.blur_radius,
-					rc.blur_enabled);
+					rc.blur_enabled)) {
+					wlr_log(WLR_ERROR, "gl_effects_apply_dual_kawase_blur failed for view %p", view);
+				}
 			}
 
 			if (rc.corner_radius > 0) {
-				gl_effects_render_view_content(
+				if (!gl_effects_render_view_content(
 					server.renderer,
 					state->buffer,
 					view,
-					&content_box,
+					&window_box,
 					scene_output->x,
 					scene_output->y,
 					wlr_output->scale,
-					inner_r,
-					1.0f);
+					outer_r,
+					1.0f)) {
+					wlr_log(WLR_ERROR, "gl_effects_render_view_content failed for view %p", view);
+				}
 			}
 		}
 	}
@@ -248,6 +301,7 @@ lab_wlr_scene_output_commit(struct wlr_scene_output *scene_output,
 		scene_output_damage(scene_output, &region);
 		pixman_region32_fini(&region);
 	}
+
 
 	return true;
 }

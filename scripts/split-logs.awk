@@ -26,7 +26,7 @@
     #   [12345.678] -> wl_compositor@1.create_surface(...)
     #   [12345.678] wl_surface@3.attach(...)
     #   [12345.678] zxdg_toplevel_v6@7.configure(...)
-    if (line ~ /^\[[0-9]+(\.[0-9]+)?\] (-> )?[a-zA-Z0-9_]+@[0-9]+/ || line ~ /@[0-9]+(\.[a-zA-Z0-9_]+)?\(/) {
+    if (line ~ /^\[([0-9:]+)(\.[0-9]+)?\] (-> )?[a-zA-Z0-9_]+[@#][0-9]+/ || line ~ /[@#][0-9]+(\.[a-zA-Z0-9_]+)?\(/) {
         if (WAYLAND_LOG != "") {
             print line >> WAYLAND_LOG
             fflush(WAYLAND_LOG)
@@ -70,3 +70,4 @@
         }
     }
 }
+

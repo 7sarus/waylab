@@ -38,6 +38,14 @@ bool gl_effects_render_texture_rounded(
 	float alpha,
 	enum wl_output_transform transform);
 
+bool gl_effects_render_rect_rounded(
+	struct wlr_renderer *renderer,
+	struct wlr_buffer *dst_buffer,
+	const struct wlr_box *dst_box,
+	const float color[static 4],
+	const struct wlr_box *window_box,
+	float corner_radius);
+
 /**
  * Anti-aliased corner clearing for window boxes on the output buffer.
  */
